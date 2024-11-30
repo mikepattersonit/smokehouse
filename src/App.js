@@ -6,15 +6,15 @@ import Chart from './components/Chart/Chart';
 import Alerts from './components/Alerts/Alerts';
 import MeatAssignment from './components/MeatAssignment/MeatAssignment';
 
-// Configure AWS SDK
+// AWS Configuration
 AWS.config.update({
-  region: 'us-east-2', // Update for your AWS region
+  region: 'us-east-2', // Ensure this matches your AWS region
 });
 
 const sns = new AWS.SNS();
 
 function App() {
-  const [mockData, setMockData] = useState([]);
+  const [sensorData, setSensorData] = useState([]);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [lastMessageTime, setLastMessageTime] = useState(null);
@@ -24,6 +24,7 @@ function App() {
   const [assignedMeat, setAssignedMeat] = useState([]);
 
   const topicArn = 'arn:aws:sns:us-east-2:<account_id>:SmokehouseAlerts'; // Replace <account_id> with your AWS account ID
+  const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors'; // Replace with your API Gateway URL
 
   const mockProbes = [
     { id: 'probe1', label: 'Probe 1' },
@@ -39,29 +40,44 @@ function App() {
     { id: 5, name: 'Turkey' },
   ];
 
-  // Simulate receiving sensor data
+  // Fetch sensor data from the API Gateway
   useEffect(() => {
-    const interval = setInterval(() => {
-      const newMessage = [
-        { id: 'internal_temp', label: 'Internal Temp', value: Math.random() * 100 },
-        { id: 'sensor0', label: 'Bottom Temp', value: Math.random() * 100 },
-        { id: 'sensor1', label: 'Middle Temp', value: Math.random() * 100 },
-        { id: 'sensor2', label: 'Top Temp', value: Math.random() * 100 },
-        { id: 'humidity', label: 'Humidity (%)', value: Math.random() * 100 },
-        { id: 'smoke_ppm', label: 'Smoke PPM', value: Math.random() * 100 },
-      ];
+    const fetchSensorData = async () => {
+      try {
+        console.log('Fetching sensor data from API...');
+        const response = await fetch(`${apiEndpoint}?session_id=12345`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
 
-      setMockData(newMessage); // Replace all mock data with new data for simplicity
-      setLastMessageTime(new Date());
+        if (!response.ok) {
+          throw new Error(`API error: ${response.statusText}`);
+        }
 
-      if (!isSessionActive) {
-        setIsSessionActive(true);
-        setSessionStartTime(new Date());
+        const data = await response.json();
+        console.log('Received sensor data:', data);
+
+        if (data && data.length > 0) {
+          setSensorData(data);
+          setLastMessageTime(new Date());
+
+          if (!isSessionActive) {
+            setIsSessionActive(true);
+            setSessionStartTime(new Date());
+          }
+        } else {
+          console.warn('No data received from API');
+        }
+      } catch (error) {
+        console.error('Error fetching sensor data:', error);
       }
-    }, 5000);
+    };
 
+    const interval = setInterval(fetchSensorData, 5000); // Poll every 5 seconds
     return () => clearInterval(interval);
-  }, [isSessionActive]);
+  }, [isSessionActive, apiEndpoint]);
 
   // Handle session timeout
   useEffect(() => {
@@ -79,15 +95,15 @@ function App() {
 
   // Handle alerts
   useEffect(() => {
-    if (isSessionActive && mockData.length > 0) {
-      mockData.forEach((dataPoint) => {
+    if (isSessionActive && sensorData.length > 0) {
+      sensorData.forEach((dataPoint) => {
         const alert = alerts[dataPoint.id];
         if (alert) {
           if (
             (alert.min !== null && dataPoint.value < alert.min) ||
             (alert.max !== null && dataPoint.value > alert.max)
           ) {
-            const message = `${alert.label} value (${dataPoint.value.toFixed(
+            const message = `${dataPoint.label} value (${dataPoint.value.toFixed(
               2
             )}) breached thresholds: Min (${alert.min}), Max (${alert.max}).`;
             sendAlert(message);
@@ -95,7 +111,7 @@ function App() {
         }
       });
     }
-  }, [mockData, alerts, isSessionActive]);
+  }, [sensorData, alerts, isSessionActive]);
 
   // Function to send alerts via AWS SNS
   const sendAlert = (message) => {
@@ -177,10 +193,10 @@ function App() {
       <main>
         {isSessionActive ? (
           <>
-            <SensorDataTable />
-            <Chart data={mockData} />
+            <SensorDataTable data={sensorData} />
+            <Chart data={sensorData} />
             <Alerts
-              sensors={mockData}
+              sensors={sensorData}
               alerts={alerts}
               onSetAlert={handleSetAlerts}
               onRemoveAlert={handleRemoveAlert}

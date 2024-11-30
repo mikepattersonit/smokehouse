@@ -1,31 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
-function SensorDataTable() {
-  const [sensorData, setSensorData] = useState([]);
-  const [timestamp, setTimestamp] = useState(null);
+function SensorDataTable({ data }) {
+  if (!data || data.length === 0) {
+    return (
+      <div>
+        <h2>Real-Time Sensor Data</h2>
+        <p>No sensor data available.</p>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    // Mock data generation for real-time updates
-    const interval = setInterval(() => {
-      const mockData = [
-        { id: 'internal_temp', label: 'Internal Temp', value: Math.random() * 100 },
-        { id: 'sensor0', label: 'Bottom Temp', value: Math.random() * 100 },
-        { id: 'sensor1', label: 'Middle Temp', value: Math.random() * 100 },
-        { id: 'sensor2', label: 'Top Temp', value: Math.random() * 100 },
-        { id: 'humidity', label: 'Humidity (%)', value: Math.random() * 100 },
-        { id: 'smoke_ppm', label: 'Smoke PPM', value: Math.random() * 100 },
-      ];
-      setSensorData(mockData);
-      setTimestamp(new Date().toLocaleTimeString());
-    }, 2000);
-
-    return () => clearInterval(interval); // Cleanup on unmount
-  }, []);
+  // Define the desired sensor display order
+  const sensorOrder = [
+    'internal_temp',
+    'top_temp',
+    'middle_temp',
+    'bottom_temp',
+    'probe1_temp',
+    'probe2_temp',
+    'probe3_temp',
+    'humidity',
+    'smoke_ppm',
+  ];
 
   return (
     <div>
       <h2>Real-Time Sensor Data</h2>
-      <p>Last Updated: {timestamp}</p>
+      <p>Last Updated: {new Date(data[0].timestamp).toLocaleTimeString()}</p>
       <table border="1" style={{ margin: 'auto', width: '80%', textAlign: 'center' }}>
         <thead>
           <tr>
@@ -34,12 +35,17 @@ function SensorDataTable() {
           </tr>
         </thead>
         <tbody>
-          {sensorData.map((sensor) => (
-            <tr key={sensor.id}>
-              <td>{sensor.label}</td>
-              <td>{sensor.value.toFixed(2)}</td>
-            </tr>
-          ))}
+          {sensorOrder.map((sensorKey) => {
+            if (data[0][sensorKey] !== undefined) {
+              return (
+                <tr key={sensorKey}>
+                  <td>{sensorKey.replace(/_/g, ' ').toUpperCase()}</td>
+                  <td>{data[0][sensorKey]}</td>
+                </tr>
+              );
+            }
+            return null; // Skip if the sensor key doesn't exist in the data
+          })}
         </tbody>
       </table>
     </div>

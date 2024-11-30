@@ -38,7 +38,9 @@ const Alerts = ({ sensors, alerts, onSetAlert, onRemoveAlert }) => {
             value={selectedSensor}
             onChange={(e) => setSelectedSensor(e.target.value)}
           >
-            <option value="">Select a sensor</option>
+            <option value="" disabled>
+              Select a sensor
+            </option>
             {sensors.map((sensor) => (
               <option key={sensor.id} value={sensor.id}>
                 {sensor.label}
@@ -80,7 +82,12 @@ const Alerts = ({ sensors, alerts, onSetAlert, onRemoveAlert }) => {
               <strong>{alert.label}:</strong>{' '}
               {alert.min !== null && `Min: ${alert.min} `}
               {alert.max !== null && `Max: ${alert.max} `}
-              <button onClick={() => onRemoveAlert(sensorId)}>Remove</button>
+              <button
+                style={{ marginLeft: '10px' }}
+                onClick={() => onRemoveAlert(sensorId)}
+              >
+                Remove
+              </button>
             </li>
           ))}
         </ul>

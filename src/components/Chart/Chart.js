@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -15,17 +15,24 @@ import {
 ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Title, Tooltip, Legend);
 
 const Chart = ({ data }) => {
+  // Extract sensor IDs dynamically from data
+  const sensorKeys = Object.keys(data[0] || {}).filter(
+    (key) => key !== 'timestamp' && key !== 'session_id'
+  );
+
+  const [selectedSensors, setSelectedSensors] = useState(sensorKeys);
+
   const chartData = {
-    labels: data.map((point) => point.timestamp), // X-axis: Time
-    datasets: [
-      {
-        label: 'Sensor Data',
-        data: data.map((point) => point.value), // Y-axis: Sensor Values
-        borderColor: 'rgba(75,192,192,1)',
-        backgroundColor: 'rgba(75,192,192,0.2)',
-        tension: 0.4,
-      },
-    ],
+    labels: data.map((point) => new Date(point.timestamp).toLocaleString()), // X-axis: Time (formatted)
+    datasets: selectedSensors.map((sensor) => ({
+      label: sensor.replace(/_/g, ' '), // Format sensor name for display
+      data: data.map((point) => point[sensor] || 0), // Y-axis: Sensor Values
+      borderColor: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(
+        Math.random() * 255
+      )}, ${Math.floor(Math.random() * 255)}, 1)`, // Unique color for each dataset
+      backgroundColor: 'rgba(0, 0, 0, 0)', // Transparent fill
+      tension: 0.4,
+    })),
   };
 
   const options = {
@@ -34,10 +41,21 @@ const Chart = ({ data }) => {
       legend: {
         position: 'top',
       },
+      tooltip: {
+        callbacks: {
+          label: function (context) {
+            return `${context.dataset.label}: ${context.raw}`;
+          },
+        },
+      },
     },
     scales: {
       x: {
         title: { display: true, text: 'Time' },
+        ticks: {
+          maxRotation: 45,
+          minRotation: 45,
+        },
       },
       y: {
         title: { display: true, text: 'Value' },
@@ -46,9 +64,30 @@ const Chart = ({ data }) => {
     },
   };
 
+  const handleSensorChange = (e) => {
+    const selectedOptions = Array.from(e.target.selectedOptions).map(
+      (option) => option.value
+    );
+    setSelectedSensors(selectedOptions);
+  };
+
   return (
     <div>
       <h2>Historical Data</h2>
+      <label htmlFor="sensor-select">Select Sensors:</label>
+      <select
+        id="sensor-select"
+        multiple
+        value={selectedSensors}
+        onChange={handleSensorChange}
+        style={{ margin: '10px', height: '100px', width: '200px' }}
+      >
+        {sensorKeys.map((sensor) => (
+          <option key={sensor} value={sensor}>
+            {sensor.replace(/_/g, ' ')} {/* Display friendly names */}
+          </option>
+        ))}
+      </select>
       <Line data={chartData} options={options} />
     </div>
   );
