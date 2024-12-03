@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import AWS from 'aws-sdk';
 import './App.css';
-import SensorDataTable from './components/SensorDataTable/SensorDataTable';
 import Chart from './components/Chart/Chart';
 import Alerts from './components/Alerts/Alerts';
 import ProbeCard from './components/ProbeCard/ProbeCard';
