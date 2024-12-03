@@ -1,0 +1,27 @@
+/* ProbeCard.css */
+
+.probe-card {
+  display: flex;
+  flex-direction: column; /* Ensure fields stack vertically */
+  gap: 10px; /* Add space between the elements */
+}
+
+.probe-card label,
+.probe-card input,
+.probe-card button,
+.probe-card select {
+  width: 100%; /* Make sure all elements take up the full width of the card */
+  box-sizing: border-box; /* Ensures padding does not affect the total width */
+}
+
+.probe-card .input-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px; /* Space between label and input */
+}
+
+.probe-card input[type="number"],
+.probe-card button {
+  max-width: 150px; /* Control the maximum size of input and button */
+}
