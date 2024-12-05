@@ -1,97 +1,104 @@
-import React, { useState } from 'react';
+// Alerts.js
+import React, { useEffect, useState } from 'react';
+import AWS from 'aws-sdk';
+import Modal from 'react-modal';
 
-const Alerts = ({ sensors, alerts, onSetAlert, onRemoveAlert }) => {
-  const [selectedSensor, setSelectedSensor] = useState('');
-  const [min, setMin] = useState('');
-  const [max, setMax] = useState('');
+AWS.config.update({
+  region: 'us-east-2',
+});
 
-  const handleSave = (e) => {
-    e.preventDefault();
-    if (!selectedSensor) {
-      alert('Please select a sensor');
-      return;
-    }
+const sns = new AWS.SNS();
 
-    const thresholds = {
-      [selectedSensor]: {
-        min: min ? parseFloat(min) : null,
-        max: max ? parseFloat(max) : null,
-        label: sensors.find((sensor) => sensor.id === selectedSensor).label,
-      },
+Modal.setAppElement('#root'); // Ensure this element exists for accessibility compliance
+
+const Alerts = ({ alerts, onClearAlert }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [mobileNumber, setMobileNumber] = useState('');
+
+  useEffect(() => {
+    alerts.forEach((alert) => {
+      if (alert.active && mobileNumber) {
+        sendAlertNotification(alert);
+      } else if (alert.active && !mobileNumber) {
+        setIsModalOpen(true);
+      }
+    });
+  }, [alerts, mobileNumber]);
+
+  const sendAlertNotification = (alert) => {
+    const message = `Smokehouse Probe Alert for ${alert.probeName}. ${alert.min ? `Minimum threshold is ${alert.min}°F.` : ''} ${alert.max ? `Maximum threshold is ${alert.max}°F.` : ''}`;
+    
+    const params = {
+      Message: message,
+      PhoneNumber: mobileNumber,
+      TopicArn: 'arn:aws:sns:us-east-2:623626440685:SmokehouseAlerts',
+      
     };
 
-    onSetAlert(thresholds);
+    sns.publish(params, (err, data) => {
+      if (err) {
+        console.error('Error sending alert:', err);
+      } else {
+        console.log('Alert sent successfully:', data);
+      }
+    });
+  };
 
-    // Reset form
-    setSelectedSensor('');
-    setMin('');
-    setMax('');
+  const handleSubscribe = () => {
+    if (mobileNumber) {
+      setIsModalOpen(false);
+    } else {
+      alert('Please enter a valid mobile number');
+    }
   };
 
   return (
     <div>
-      <h2>Set Alerts</h2>
-      <form onSubmit={handleSave}>
-        <label>
-          Sensor:
-          <select
-            value={selectedSensor}
-            onChange={(e) => setSelectedSensor(e.target.value)}
-          >
-            <option value="" disabled>
-              Select a sensor
-            </option>
-            {sensors.map((sensor) => (
-              <option key={sensor.id} value={sensor.id}>
-                {sensor.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <br />
-        <label>
-          Min Threshold:
-          <input
-            type="number"
-            value={min}
-            onChange={(e) => setMin(e.target.value)}
-            placeholder="Optional"
-          />
-        </label>
-        <br />
-        <label>
-          Max Threshold:
-          <input
-            type="number"
-            value={max}
-            onChange={(e) => setMax(e.target.value)}
-            placeholder="Optional"
-          />
-        </label>
-        <br />
-        <button type="submit">Save</button>
-      </form>
-
-      <h3>Active Alerts</h3>
-      {Object.keys(alerts).length === 0 ? (
+      <h2>Active Alerts</h2>
+      {alerts.length === 0 ? (
         <p>No active alerts</p>
       ) : (
         <ul>
-          {Object.entries(alerts).map(([sensorId, alert]) => (
-            <li key={sensorId}>
-              <strong>{alert.label}:</strong>{' '}
-              {alert.min !== null && `Min: ${alert.min} `}
-              {alert.max !== null && `Max: ${alert.max} `}
+          {alerts.map((alert) => (
+            <li key={alert.probeId}>
+              <strong>{alert.probeName}:</strong>
+              {alert.min !== null && ` Min: ${alert.min} `}
+              {alert.max !== null && ` Max: ${alert.max} `}
               <button
                 style={{ marginLeft: '10px' }}
-                onClick={() => onRemoveAlert(sensorId)}
+                onClick={() => onClearAlert(alert.probeId)}
               >
-                Remove
+                Clear Alert
               </button>
             </li>
           ))}
         </ul>
       )}
+
+      {/* Modal for mobile number subscription */}
+      <Modal
+        isOpen={isModalOpen}
+        onRequestClose={() => setIsModalOpen(false)}
+        style={{
+          content: {
+            top: '50%',
+            left: '50%',
+            right: 'auto',
+            bottom: 'auto',
+            marginRight: '-50%',
+            transform: 'translate(-50%, -50%)',
+          },
+        }}
+      >
+        <h2>Subscribe for Alerts</h2>
+        <input
+          type="text"
+          value={mobileNumber}
+          onChange={(e) => setMobileNumber(e.target.value)}
+          placeholder="Enter your mobile number"
+        />
+        <button onClick={handleSubscribe}>Subscribe</button>
+      </Modal>
     </div>
   );
 };

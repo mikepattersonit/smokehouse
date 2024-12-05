@@ -1,251 +1,181 @@
+// App.js (Main file for the application)
 import React, { useState, useEffect } from 'react';
 import AWS from 'aws-sdk';
 import './App.css';
-import SensorDataTable from './components/SensorDataTable/SensorDataTable';
 import Chart from './components/Chart/Chart';
 import Alerts from './components/Alerts/Alerts';
-import MeatAssignment from './components/MeatAssignment/MeatAssignment';
+import ProbeCard from './components/ProbeCard/ProbeCard';
+import ProbeChart from './components/ProbeCard/ProbeChart'; // Updated import path
+import axios from 'axios';
 
-// AWS Configuration
 AWS.config.update({
-  region: 'us-east-2', // Ensure this matches your AWS region
+  region: 'us-east-2',
 });
 
 const sns = new AWS.SNS();
+const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors';
+const topicArn = 'arn:aws:sns:us-east-2:623626440685:SmokehouseAlerts';
+const meatTypesEndpoint = 'https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com/meatTypes';
 
 function App() {
   const [sensorData, setSensorData] = useState([]);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [lastMessageTime, setLastMessageTime] = useState(null);
-  const [alerts, setAlerts] = useState({});
-  const [mobileNumber, setMobileNumber] = useState('');
-  const [subscribedNumbers, setSubscribedNumbers] = useState([]);
   const [assignedMeat, setAssignedMeat] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [probes, setProbes] = useState([
+    { id: 'probe1_temp', name: 'Probe 1', minAlert: '', maxAlert: '', mobileNumber: '', meatType: '', meatWeight: '', temperature: null },
+    { id: 'probe2_temp', name: 'Probe 2', minAlert: '', maxAlert: '', mobileNumber: '', meatType: '', meatWeight: '', temperature: null },
+    { id: 'probe3_temp', name: 'Probe 3', minAlert: '', maxAlert: '', mobileNumber: '', meatType: '', meatWeight: '', temperature: null },
+  ]);
+  const [smokehouseStatus, setSmokehouseStatus] = useState({
+    outside: null,
+    top: null,
+    middle: null,
+    bottom: null,
+    humidity: null,
+    smokePPM: null
+  });
 
-  const topicArn = 'arn:aws:sns:us-east-2:<account_id>:SmokehouseAlerts'; // Replace <account_id> with your AWS account ID
-  const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors'; // Replace with your API Gateway URL
+  useEffect(() => {
+    const fetchMeatTypes = async () => {
+      try {
+        console.log('Fetching meat types from API...');
+        const response = await axios.get(meatTypesEndpoint);
+        if (response.status !== 200) {
+          throw new Error(`API error: ${response.statusText}`);
+        }
+        setAssignedMeat(response.data);
+        console.log('Received meat types:', response.data);
+      } catch (error) {
+        console.error('Error fetching meat types:', error.message);
+      }
+    };
+    fetchMeatTypes();
+  }, []); // Removed unnecessary dependency
 
-  const mockProbes = [
-    { id: 'probe1', label: 'Probe 1' },
-    { id: 'probe2', label: 'Probe 2' },
-    { id: 'probe3', label: 'Probe 3' },
-  ];
-
-  const mockMeatTypes = [
-    { id: 1, name: 'Brisket' },
-    { id: 2, name: 'Pork Shoulder' },
-    { id: 3, name: 'Ribs' },
-    { id: 4, name: 'Chicken' },
-    { id: 5, name: 'Turkey' },
-  ];
-
-  // Fetch sensor data from the API Gateway
   useEffect(() => {
     const fetchSensorData = async () => {
       try {
         console.log('Fetching sensor data from API...');
-        const response = await fetch(`${apiEndpoint}?session_id=12345`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+        const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
+          headers: { 'Content-Type': 'application/json' },
         });
-
-        if (!response.ok) {
+        if (response.status !== 200) {
           throw new Error(`API error: ${response.statusText}`);
         }
+        const data = response.data;
+        setSensorData(data);
+        setLastMessageTime(new Date());
 
-        const data = await response.json();
-        console.log('Received sensor data:', data);
-
-        if (data && data.length > 0) {
-          setSensorData(data);
-          setLastMessageTime(new Date());
-
-          if (!isSessionActive) {
-            setIsSessionActive(true);
-            setSessionStartTime(new Date());
-          }
-        } else {
-          console.warn('No data received from API');
+        if (!isSessionActive && data.length > 0) {
+          setIsSessionActive(true);
+          setSessionStartTime(new Date());
         }
+
+        // Extract smokehouse status from the response data
+        const statusData = data.reduce((acc, curr) => {
+          if ('internal_temp' in curr) acc.outside = curr.internal_temp;
+          if ('top_temp' in curr) acc.top = curr.top_temp;
+          if ('middle_temp' in curr) acc.middle = curr.middle_temp;
+          if ('bottom_temp' in curr) acc.bottom = curr.bottom_temp;
+          if ('humidity' in curr) acc.humidity = curr.humidity;
+          if ('smoke_ppm' in curr) acc.smokePPM = curr.smoke_ppm;
+          return acc;
+        }, {});
+
+        setSmokehouseStatus({ ...statusData });
+
+        // Update probe temperatures
+        setProbes((prevProbes) =>
+          prevProbes.map(probe => {
+            const matchingSensor = data.find(sensor => sensor[probe.id] !== undefined);
+            return matchingSensor ? { ...probe, temperature: matchingSensor[probe.id] } : probe;
+          })
+        );
       } catch (error) {
-        console.error('Error fetching sensor data:', error);
+        console.error('Error fetching sensor data:', error.message);
       }
     };
 
-    const interval = setInterval(fetchSensorData, 5000); // Poll every 5 seconds
+    const interval = setInterval(fetchSensorData, 5000);
     return () => clearInterval(interval);
-  }, [isSessionActive, apiEndpoint]);
+  }, [isSessionActive]);
 
-  // Handle session timeout
-  useEffect(() => {
-    if (isSessionActive && lastMessageTime) {
-      const timeout = setTimeout(() => {
-        const now = new Date();
-        if (now - lastMessageTime > 45 * 60 * 1000) {
-          setIsSessionActive(false);
-        }
-      }, 1000);
+  const handleSetAlert = (id, min, max, mobileNumber) => {
+    setProbes((prevProbes) =>
+      prevProbes.map((probe) =>
+        probe.id === id ? { ...probe, minAlert: min, maxAlert: max, mobileNumber: mobileNumber } : probe
+      )
+    );
 
-      return () => clearTimeout(timeout);
-    }
-  }, [lastMessageTime, isSessionActive]);
+    // Update alerts state
+    setAlerts((prevAlerts) => [
+      ...prevAlerts,
+      { probeId: id, min, max, probeName: `Probe ${id}`, active: true }
+    ]);
 
-  // Handle alerts
-  useEffect(() => {
-    if (isSessionActive && sensorData.length > 0) {
-      sensorData.forEach((dataPoint) => {
-        const alert = alerts[dataPoint.id];
-        if (alert) {
-          if (
-            (alert.min !== null && dataPoint.value < alert.min) ||
-            (alert.max !== null && dataPoint.value > alert.max)
-          ) {
-            const message = `${dataPoint.label} value (${dataPoint.value.toFixed(
-              2
-            )}) breached thresholds: Min (${alert.min}), Max (${alert.max}).`;
-            sendAlert(message);
-          }
-        }
-      });
-    }
-  }, [sensorData, alerts, isSessionActive]);
-
-  // Function to send alerts via AWS SNS
-  const sendAlert = (message) => {
-    const params = {
-      Message: message,
+    sns.publish({
+      Message: `Alert set for Probe ${id}: Min=${min}, Max=${max}`,
+      PhoneNumber: mobileNumber,
       TopicArn: topicArn,
-    };
-
-    sns.publish(params, (err, data) => {
+    }, (err, data) => {
       if (err) {
         console.error('Error sending alert:', err);
       } else {
-        console.log('Alert sent:', data);
+        console.log('Alert sent successfully:', data);
       }
     });
   };
 
-  // Add new alert thresholds
-  const handleSetAlerts = (thresholds) => {
-    setAlerts((prev) => ({ ...prev, ...thresholds }));
-  };
-
-  // Remove an alert
-  const handleRemoveAlert = (sensorId) => {
-    setAlerts((prev) => {
-      const updated = { ...prev };
-      delete updated[sensorId];
-      return updated;
-    });
-  };
-
-  // Subscribe a new mobile number
-  const handleSubscribe = (e) => {
-    e.preventDefault();
-    if (!mobileNumber) {
-      alert('Please enter a valid mobile number');
-      return;
-    }
-
-    const params = {
-      Protocol: 'SMS',
-      TopicArn: topicArn,
-      Endpoint: mobileNumber,
-    };
-
-    sns.subscribe(params, (err, data) => {
-      if (err) {
-        console.error('Error subscribing number:', err);
-        alert('Failed to subscribe the number. Check the console for details.');
-      } else {
-        console.log('Successfully subscribed:', data);
-        setSubscribedNumbers((prev) => [...prev, mobileNumber]);
-        setMobileNumber('');
-        alert(`Number ${mobileNumber} subscribed successfully!`);
-      }
-    });
-  };
-
-  // Handle meat assignment
-  const handleAssignMeat = (assignment) => {
-    setAssignedMeat((prev) => [...prev, assignment]);
-  };
-
-  // Remove a meat assignment
-  const handleRemoveMeatAssignment = (indexToRemove) => {
-    setAssignedMeat((prev) => prev.filter((_, index) => index !== indexToRemove));
+  const handleMeatChange = (id, meatType, meatWeight) => {
+    setProbes((prevProbes) =>
+      prevProbes.map((probe) =>
+        probe.id === id ? { ...probe, meatType, meatWeight } : probe
+      )
+    );
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>Smokehouse Dashboard</h1>
-        <p>
-          {isSessionActive
-            ? `Session Active (Started: ${sessionStartTime?.toLocaleString()})`
-            : 'No Active Session'}
-        </p>
-      </header>
-      <main>
-        {isSessionActive ? (
-          <>
-            <SensorDataTable data={sensorData} />
-            <Chart data={sensorData} />
-            <Alerts
-              sensors={sensorData}
-              alerts={alerts}
-              onSetAlert={handleSetAlerts}
-              onRemoveAlert={handleRemoveAlert}
-            />
-            <h3>Subscribe to Alerts</h3>
-            <form onSubmit={handleSubscribe}>
-              <label>
-                Mobile Number:
-                <input
-                  type="tel"
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value)}
-                  placeholder="+1234567890"
-                  required
-                />
-              </label>
-              <button type="submit">Subscribe</button>
-            </form>
-            <h4>Subscribed Numbers:</h4>
-            <ul>
-              {subscribedNumbers.map((number, index) => (
-                <li key={index}>{number}</li>
-              ))}
-            </ul>
-            <MeatAssignment
-              probes={mockProbes}
-              meatTypes={mockMeatTypes}
-              onAssignMeat={handleAssignMeat}
-            />
-            <h3>Assigned Meat</h3>
-            <ul>
-              {assignedMeat.map((assignment, index) => (
-                <li key={index}>
-                  Probes: {assignment.probes.join(', ')} - {assignment.meat} (
-                  {assignment.weight} lbs)
-                  <button
-                    style={{ marginLeft: '10px' }}
-                    onClick={() => handleRemoveMeatAssignment(index)}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p>Waiting for smokehouse to turn on...</p>
-        )}
-      </main>
+    <div className="app-container">
+      <h1>SmokeGPT - AI Powered Smokehouse</h1>
+
+      <div className="layout-container">
+        <div className="left-column">
+          <div className="smokehouse-status-container" style={{ display: 'flex', alignItems: 'flex-start' }}>
+            <div className="probe-card" style={{ marginRight: '10px' }}>
+              <h3>Smokehouse Status</h3>
+              <p>Outside Temp: {smokehouseStatus.outside !== null ? smokehouseStatus.outside : 'N/A'}</p>
+              <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>
+              <p>Middle: {smokehouseStatus.middle !== null ? smokehouseStatus.middle : 'N/A'}</p>
+              <p>Bottom: {smokehouseStatus.bottom !== null ? smokehouseStatus.bottom : 'N/A'}</p>
+              <p>Humidity: {smokehouseStatus.humidity !== null ? smokehouseStatus.humidity : 'N/A'}</p>
+              <p>Smoke PPM: {smokehouseStatus.smokePPM !== null ? smokehouseStatus.smokePPM : 'N/A'}</p>
+            </div>
+            <div className="smokehouse-chart-container" style={{ flex: 1 }}>
+              {sensorData && sensorData.length > 0 && <Chart data={sensorData} />} {/* Updated Chart component */}
+            </div>
+          </div>
+
+          {/* Render Probe Cards and Probe Charts */}
+          {probes && probes.length > 0 && probes.map((probe) => (
+            <div key={probe.id} className="probe-container" style={{ display: 'flex', alignItems: 'center' }}>
+              <ProbeCard
+                probe={probe}
+                onSetAlert={handleSetAlert}
+                onMeatChange={handleMeatChange}
+                meatTypes={assignedMeat || []}
+              />
+              <div className="probe-chart-container" style={{ flex: 1, marginLeft: '10px' }}>
+                <ProbeChart probe={probe} data={sensorData} /> {/* Updated path for ProbeChart */}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {alerts && alerts.length > 0 && <Alerts alerts={alerts} />}
     </div>
   );
 }

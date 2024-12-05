@@ -1,30 +1,41 @@
-.App {
-    text-align: center;
-  }
-  
-  .App-header {
-    background-color: #282c34;
-    min-height: 10vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    padding: 1rem;
-  }
-  
-  h2 {
-    margin-top: 1rem;
-  }
-  
-  table {
-    border-collapse: collapse;
-    width: 80%;
-    margin: 1rem auto;
-  }
-  
-  th, td {
-    padding: 0.5rem;
-    border: 1px solid #ddd;
-  }
-  
+/* App.css (Styling for the application) */
+
+.app-container {
+  text-align: center;
+  background-color: #333;
+  color: #fff;
+  padding: 20px;
+}
+
+.probe-cards-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center;
+}
+
+.probe-card {
+  background-color: #444;
+  padding: 20px;
+  border-radius: 10px;
+  width: 300px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.probe-card input, .probe-card select, .probe-card button {
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 5px;
+}
+
+.probe-card button {
+  background-color: #007bff;
+  color: #fff;
+  cursor: pointer;
+}
+
+.probe-card button:hover {
+  background-color: #0056b3;
+}
