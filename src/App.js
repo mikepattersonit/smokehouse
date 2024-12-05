@@ -1,11 +1,11 @@
-// App.js (Main file for the application)
+// App.js (Updated)
 import React, { useState, useEffect } from 'react';
 import AWS from 'aws-sdk';
 import './App.css';
 import Chart from './components/Chart/Chart';
 import Alerts from './components/Alerts/Alerts';
 import ProbeCard from './components/ProbeCard/ProbeCard';
-import ProbeChart from './components/ProbeCard/ProbeChart'; // Updated import path
+import ProbeChart from './components/ProbeCard/ProbeChart';
 import axios from 'axios';
 
 AWS.config.update({
@@ -16,6 +16,7 @@ const sns = new AWS.SNS();
 const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors';
 const topicArn = 'arn:aws:sns:us-east-2:623626440685:SmokehouseAlerts';
 const meatTypesEndpoint = 'https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com/meatTypes';
+const probeAssignmentEndpoint = 'https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignment'; // New endpoint for probe assignment
 
 function App() {
   const [sensorData, setSensorData] = useState([]);
@@ -53,7 +54,7 @@ function App() {
       }
     };
     fetchMeatTypes();
-  }, []); // Removed unnecessary dependency
+  }, []);
 
   useEffect(() => {
     const fetchSensorData = async () => {
@@ -129,12 +130,25 @@ function App() {
     });
   };
 
-  const handleMeatChange = (id, meatType, meatWeight) => {
+  const handleMeatChange = async (id, meatType, meatWeight) => {
     setProbes((prevProbes) =>
       prevProbes.map((probe) =>
         probe.id === id ? { ...probe, meatType, meatWeight } : probe
       )
     );
+
+    try {
+      // Save meat assignment to the database via the new endpoint
+      await axios.post(probeAssignmentEndpoint, {
+        probeId: id,
+        meatType,
+        meatWeight,
+        sessionId: '12345', // Use appropriate session ID
+      });
+      console.log('Probe assignment saved successfully');
+    } catch (error) {
+      console.error('Error saving probe assignment:', error.message);
+    }
   };
 
   return (
