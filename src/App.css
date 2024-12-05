@@ -1,41 +1,130 @@
-/* App.css (Styling for the application) */
+/* App.css */
 
-.app-container {
+/* General Styling */
+body {
+  font-family: 'Arial', sans-serif;
+  background-color: #1a1a1a;
+  color: #f0f0f0;
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3 {
+  color: #ffffff;
   text-align: center;
-  background-color: #333;
-  color: #fff;
+}
+
+.container {
+  margin: 0 auto;
+  max-width: 1200px;
   padding: 20px;
 }
 
-.probe-cards-container {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  justify-content: center;
+/* Navigation Bar */
+.navbar {
+  background-color: #2b2b2b;
+  padding: 10px 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid #444;
 }
 
-.probe-card {
+.navbar a {
+  color: #f0f0f0;
+  text-decoration: none;
+  padding: 10px 15px;
+  display: inline-block;
+  transition: background-color 0.3s;
+}
+
+.navbar a:hover {
   background-color: #444;
-  padding: 20px;
-  border-radius: 10px;
-  width: 300px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-
-.probe-card input, .probe-card select, .probe-card button {
-  margin-top: 10px;
-  width: 100%;
-  padding: 10px;
-  border: none;
   border-radius: 5px;
 }
 
-.probe-card button {
-  background-color: #007bff;
-  color: #fff;
-  cursor: pointer;
+/* Cards */
+.card {
+  background-color: #2b2b2b;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  padding: 20px;
+  margin: 20px;
+  color: #ffffff;
 }
 
-.probe-card button:hover {
+/* Buttons */
+button {
+  background-color: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 20px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s, transform 0.3s;
+}
+
+button:hover {
   background-color: #0056b3;
+  transform: scale(1.05);
+}
+
+/* Inputs */
+input, select {
+  background-color: #3a3a3a;
+  color: #ffffff;
+  border: 1px solid #555;
+  border-radius: 5px;
+  padding: 10px;
+  width: calc(100% - 50px);
+  margin-bottom: 15px;
+}
+
+input::placeholder {
+  color: #bbbbbb;
+}
+
+/* Chart Styling */
+.chart-container {
+  position: relative;
+  width: 50%;
+  max-width: 800px;
+  height: auto;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #2b2b2b;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+canvas {
+  width: 100% !important;
+  height: auto !important;
+  max-height: 400px;
+}
+
+/* Responsive Design */
+@media screen and (max-width: 768px) {
+  .card {
+      margin: 10px;
+      padding: 15px;
+  }
+
+  button {
+      padding: 8px 16px;
+      font-size: 14px;
+  }
+
+  input, select {
+      padding: 8px;
+      font-size: 14px;
+  }
+
+  .chart-container {
+      padding: 15px;
+      max-width: 50%;
+  }
+
+  canvas {
+      max-height: 300px;
+  }
 }
