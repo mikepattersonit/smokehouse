@@ -30,7 +30,7 @@ function App() {
     { id: 'probe3_temp', name: 'Probe 3', minAlert: '', maxAlert: '', mobileNumber: '', meatType: '', meatWeight: '', temperature: null },
   ]);
   const [smokehouseStatus, setSmokehouseStatus] = useState({
-    internal: null,
+    outside: null,
     top: null,
     middle: null,
     bottom: null,
@@ -76,7 +76,7 @@ function App() {
 
         // Extract smokehouse status from the response data
         const statusData = data.reduce((acc, curr) => {
-          if ('internal_temp' in curr) acc.internal = curr.internal_temp;
+          if ('internal_temp' in curr) acc.outside = curr.internal_temp;
           if ('top_temp' in curr) acc.top = curr.top_temp;
           if ('middle_temp' in curr) acc.middle = curr.middle_temp;
           if ('bottom_temp' in curr) acc.bottom = curr.bottom_temp;
@@ -146,7 +146,7 @@ function App() {
           <div className="smokehouse-status-container" style={{ display: 'flex', alignItems: 'flex-start' }}>
             <div className="probe-card" style={{ marginRight: '10px' }}>
               <h3>Smokehouse Status</h3>
-              <p>Internal: {smokehouseStatus.internal !== null ? smokehouseStatus.internal : 'N/A'}</p>
+              <p>Outside Temp: {smokehouseStatus.outside !== null ? smokehouseStatus.outside : 'N/A'}</p>
               <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>
               <p>Middle: {smokehouseStatus.middle !== null ? smokehouseStatus.middle : 'N/A'}</p>
               <p>Bottom: {smokehouseStatus.bottom !== null ? smokehouseStatus.bottom : 'N/A'}</p>

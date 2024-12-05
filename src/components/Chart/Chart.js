@@ -19,8 +19,9 @@ const Chart = ({ data }) => {
   // Extract chart data for the selected sensors
   const labels = data.map(item => new Date(item.timestamp).toLocaleTimeString());
   const datasets = selectedSensors.map((sensor) => {
+    const sensorLabel = sensor === 'internal_temp' ? 'OUTSIDE TEMP' : sensor.replace(/_/g, ' ').toUpperCase();
     return {
-      label: sensor.replace(/_/g, ' ').toUpperCase(),
+      label: sensorLabel,
       data: data.map(item => item[sensor]),
       fill: false,
       borderColor: `#${Math.floor(Math.random()*16777215).toString(16)}`, // Random color for each line
@@ -45,7 +46,7 @@ const Chart = ({ data }) => {
               checked={selectedSensors.includes(sensor)}
               onChange={handleSensorSelection}
             />
-            {sensor.replace(/_/g, ' ').toUpperCase()}
+            {sensor === 'internal_temp' ? 'OUTSIDE TEMP' : sensor.replace(/_/g, ' ').toUpperCase()}
           </label>
         ))}
       </div>
