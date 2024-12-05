@@ -1,48 +1,46 @@
-node_modules
-
-# ---- smokehouse standard ignores ----
-# Node / React
+# Node / CRA
 node_modules/
-dist/
 build/
+dist/
+coverage/
+*.log
+npm-debug.log*
+yarn-error.log*
+.eslintcache
+/.pnp
+.pnp.js
+
+# Env files (keep examples)
 .env
-*.env.local
+.env.*.local
+!.env.example
+
+# React / cache
+.cache/
+.vite/
+
+# AWS & artifacts
+.artifacts/
+*.zip
+lambdas/**/__pycache__/
+**/.terraform/
+**/.serverless/
 
 # Python
+.venv/
+venv/
 __pycache__/
 *.pyc
-.venv/
 
-# Firmware secrets & certs
-firmware/credentials.h
-*.pem
-*.crt
-*.der
-*.key
+# Firmware (secrets & build)
+firmware/**/credentials.h
+firmware/**/secrets*.h
+firmware/**/*.bin
+firmware/**/*.elf
+firmware/**/*.map
 
-# OS / editor
+# IDE / OS
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
-# ---- end smokehouse block ----
-
-# never commit inventory
-cloud-inventory/
-cloud-inventory.local/
-
-# editor backups
-*.bak
-
-# Lambda vendor dirs / bundles
-lambdas/*/node_modules/
-lambdas/*/.venv/
-lambdas/*/.pytest_cache/
-lambdas/*/__pycache__/
-lambdas/*/*.zip
-
-# IAM inventory (local only)
-cloud-inventory/iam/
-
-# IAM inventory (local only)
-cloud-inventory/iam/
-cloud-inventory/ddb/
