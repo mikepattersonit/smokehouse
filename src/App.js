@@ -158,7 +158,7 @@ function App() {
       <div className="layout-container">
         <div className="left-column">
           <div className="smokehouse-status-container" style={{ display: 'flex', alignItems: 'flex-start' }}>
-            <div className="probe-card" style={{ marginRight: '10px' }}>
+            <div className="probe-card" style={{marginLeft: '20px', marginRight: '10px' }}>
               <h3>Smokehouse Status</h3>
               <p>Outside Temp: {smokehouseStatus.outside !== null ? smokehouseStatus.outside : 'N/A'}</p>
               <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>

@@ -96,30 +96,61 @@ function ProbeCard({ probe, onSetAlert, onClearAlert, onMeatChange, meatTypes, a
   };
 
   return (
-    <div className="probe-card">
+    <div className="probe-card" style={{ marginLeft: '20px' }}> {/* Added left margin here */}
       <h3>{probe.name}</h3>
       <p>Temperature: {probe.temperature !== null ? `${probe.temperature} °F` : 'N/A'}</p>
       <div className="input-group">
         <label>Min Alert:</label>
-        <input type="number" value={minAlert} onChange={(e) => setMinAlert(e.target.value)} min={0} max={300} />
+        <input 
+          type="number" 
+          value={minAlert} 
+          onChange={(e) => setMinAlert(e.target.value)} 
+          min={0} 
+          max={300} 
+          style={{
+            width: '80px', // Adjusted width here
+            padding: '5px',
+            marginRight: '10px',
+          }}
+        />
       </div>
 
       <div className="input-group">
         <label>Max Alert:</label>
-        <input type="number" value={maxAlert} onChange={(e) => setMaxAlert(e.target.value)} min={0} max={300} />
+        <input 
+          type="number" 
+          value={maxAlert} 
+          onChange={(e) => setMaxAlert(e.target.value)} 
+          min={0} 
+          max={300} 
+          style={{
+            width: '80px', // Adjusted width here
+            padding: '5px',
+            marginRight: '10px',
+          }}
+        />
       </div>
 
       {minAlert || maxAlert ? (
         <button onClick={handleClearAlertClick}>Clear Alert</button>
       ) : (
-        <button onClick={handleSetAlertClick}>Set Alert</button>
+        <button onClick={handleSetAlertClick}>Set Alert</button> 
       )}
 
-      <button onClick={handleUseAI}>Use AI for Guidance</button>
+      <button onClick={handleUseAI}>AI Guidance</button>
 
       <div className="input-group">
-        <label>Meat Assignment:</label>
-        <select value={meatType} onChange={handleMeatChange}>
+        <label>Meat Type:</label>
+        <select 
+          value={meatType} 
+          onChange={handleMeatChange} 
+          style={{
+            marginLeft: '20px', // Added left margin for better alignment
+            width: '80px', // Adjusted width here
+            padding: '5px',
+            marginRight: '10px',
+          }}
+        >
           <option value="">Select Meat</option>
           {meatTypes.map((meat) => (
             <option key={meat.id} value={meat.name}>{meat.name}</option>
@@ -128,8 +159,18 @@ function ProbeCard({ probe, onSetAlert, onClearAlert, onMeatChange, meatTypes, a
       </div>
 
       <div className="input-group">
-        <label>Meat Weight (lbs):</label>
-        <input type="number" value={meatWeight} onChange={handleMeatWeightChange} placeholder="Enter weight in lbs" />
+        <label>Weight (lbs):</label>
+        <input 
+          type="number" 
+          value={meatWeight} 
+          onChange={handleMeatWeightChange} 
+          placeholder="Enter weight in lbs" 
+          style={{
+            marginLeft: '10px', // Added left margin for better alignment
+            width: '80px', // Adjusted width here
+            padding: '5px',
+          }}
+        />
       </div>
     </div>
   );

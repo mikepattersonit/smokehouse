@@ -1,27 +1,74 @@
 /* ProbeCard.css */
 
-.probe-card {
-  display: flex;
-  flex-direction: column; /* Ensure fields stack vertically */
-  gap: 10px; /* Add space between the elements */
+/* Chart Container */
+.chart-container {
+  position: relative;
+  margin: 20px auto;
+  padding: 20px;
+  background-color: #1e1e1e;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
 }
 
-.probe-card label,
-.probe-card input,
-.probe-card button,
-.probe-card select {
-  width: 100%; /* Make sure all elements take up the full width of the card */
-  box-sizing: border-box; /* Ensures padding does not affect the total width */
+/* Chart Titles */
+.chart-title {
+  color: #f0f0f0;
+  text-align: center;
+  font-size: 1.5em;
+  margin-bottom: 10px;
 }
 
-.probe-card .input-group {
+/* Tooltip Styling */
+.tooltip {
+  background-color: #333;
+  color: #fff;
+  border-radius: 5px;
+  padding: 5px 10px;
+  font-size: 0.9em;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Canvas Styling */
+canvas {
+  max-width: 50%;
+  height: auto;
+  border-radius: 8px;
+}
+
+/* Legend Styling */
+.legend {
   display: flex;
-  flex-direction: row;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 15px;
+}
+
+.legend-item {
+  display: flex;
   align-items: center;
-  gap: 10px; /* Space between label and input */
+  margin-right: 15px;
 }
 
-.probe-card input[type="number"],
-.probe-card button {
-  max-width: 150px; /* Control the maximum size of input and button */
+.legend-color {
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.legend-label {
+  color: #e0e0e0;
+  font-size: 0.9em;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .chart-title {
+      font-size: 1.2em;
+  }
+
+  .tooltip {
+      font-size: 0.8em;
+  }
 }
