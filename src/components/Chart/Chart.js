@@ -1,94 +1,55 @@
+// Chart.js (Updated)
 import React, { useState } from 'react';
 import { Line } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  LineElement,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  Title,
-  Tooltip,
-  Legend,
-} from 'chart.js';
-
-// Explicitly register components and scales
-ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Title, Tooltip, Legend);
+import 'chart.js/auto';
 
 const Chart = ({ data }) => {
-  // Extract sensor IDs dynamically from data
-  const sensorKeys = Object.keys(data[0] || {}).filter(
-    (key) => key !== 'timestamp' && key !== 'session_id'
-  );
+  const [selectedSensors, setSelectedSensors] = useState([
+    'internal_temp', 'top_temp', 'middle_temp', 'bottom_temp', 'humidity', 'smoke_ppm'
+  ]);
 
-  const [selectedSensors, setSelectedSensors] = useState(sensorKeys);
+  // Function to handle sensor selection
+  const handleSensorSelection = (event) => {
+    const { value, checked } = event.target;
+    setSelectedSensors((prevSelected) => 
+      checked ? [...prevSelected, value] : prevSelected.filter(sensor => sensor !== value)
+    );
+  };
+
+  // Extract chart data for the selected sensors
+  const labels = data.map(item => new Date(item.timestamp).toLocaleTimeString());
+  const datasets = selectedSensors.map((sensor) => {
+    return {
+      label: sensor.replace(/_/g, ' ').toUpperCase(),
+      data: data.map(item => item[sensor]),
+      fill: false,
+      borderColor: `#${Math.floor(Math.random()*16777215).toString(16)}`, // Random color for each line
+    };
+  });
 
   const chartData = {
-    labels: data.map((point) => new Date(point.timestamp).toLocaleString()), // X-axis: Time (formatted)
-    datasets: selectedSensors.map((sensor) => ({
-      label: sensor.replace(/_/g, ' '), // Format sensor name for display
-      data: data.map((point) => point[sensor] || 0), // Y-axis: Sensor Values
-      borderColor: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(
-        Math.random() * 255
-      )}, ${Math.floor(Math.random() * 255)}, 1)`, // Unique color for each dataset
-      backgroundColor: 'rgba(0, 0, 0, 0)', // Transparent fill
-      tension: 0.4,
-    })),
-  };
-
-  const options = {
-    responsive: true,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-      tooltip: {
-        callbacks: {
-          label: function (context) {
-            return `${context.dataset.label}: ${context.raw}`;
-          },
-        },
-      },
-    },
-    scales: {
-      x: {
-        title: { display: true, text: 'Time' },
-        ticks: {
-          maxRotation: 45,
-          minRotation: 45,
-        },
-      },
-      y: {
-        title: { display: true, text: 'Value' },
-        beginAtZero: true,
-      },
-    },
-  };
-
-  const handleSensorChange = (e) => {
-    const selectedOptions = Array.from(e.target.selectedOptions).map(
-      (option) => option.value
-    );
-    setSelectedSensors(selectedOptions);
+    labels,
+    datasets,
   };
 
   return (
     <div>
-      <h2>Historical Data</h2>
-      <label htmlFor="sensor-select">Select Sensors:</label>
-      <select
-        id="sensor-select"
-        multiple
-        value={selectedSensors}
-        onChange={handleSensorChange}
-        style={{ margin: '10px', height: '100px', width: '200px' }}
-      >
-        {sensorKeys.map((sensor) => (
-          <option key={sensor} value={sensor}>
-            {sensor.replace(/_/g, ' ')} {/* Display friendly names */}
-          </option>
+      <h2>Smokehouse Status Trends</h2>
+      <div>
+        <p>Select sensors to display:</p>
+        {['internal_temp', 'top_temp', 'middle_temp', 'bottom_temp', 'humidity', 'smoke_ppm'].map(sensor => (
+          <label key={sensor} style={{ marginRight: '10px' }}>
+            <input
+              type="checkbox"
+              value={sensor}
+              checked={selectedSensors.includes(sensor)}
+              onChange={handleSensorSelection}
+            />
+            {sensor.replace(/_/g, ' ').toUpperCase()}
+          </label>
         ))}
-      </select>
-      <Line data={chartData} options={options} />
+      </div>
+      <Line data={chartData} />
     </div>
   );
 };

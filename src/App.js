@@ -5,10 +5,11 @@ import './App.css';
 import Chart from './components/Chart/Chart';
 import Alerts from './components/Alerts/Alerts';
 import ProbeCard from './components/ProbeCard/ProbeCard';
+import ProbeChart from './components/ProbeCard/ProbeChart'; // Updated import path
 import axios from 'axios';
 
 AWS.config.update({
-  region: 'us-east-2', 
+  region: 'us-east-2',
 });
 
 const sns = new AWS.SNS();
@@ -59,50 +60,40 @@ function App() {
       try {
         console.log('Fetching sensor data from API...');
         const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
         });
-
         if (response.status !== 200) {
           throw new Error(`API error: ${response.statusText}`);
         }
-
         const data = response.data;
-        console.log('Received sensor data:', data);
+        setSensorData(data);
+        setLastMessageTime(new Date());
 
-        if (data && data.length > 0) {
-          setSensorData(data);
-          setLastMessageTime(new Date());
-
-          if (!isSessionActive) {
-            setIsSessionActive(true);
-            setSessionStartTime(new Date());
-          }
-
-          // Extract smokehouse status from the response data
-          const statusData = data.reduce((acc, curr) => {
-            if ('internal_temp' in curr) acc.internal = curr.internal_temp;
-            if ('top_temp' in curr) acc.top = curr.top_temp;
-            if ('middle_temp' in curr) acc.middle = curr.middle_temp;
-            if ('bottom_temp' in curr) acc.bottom = curr.bottom_temp;
-            if ('humidity' in curr) acc.humidity = curr.humidity;
-            if ('smoke_ppm' in curr) acc.smokePPM = curr.smoke_ppm;
-            return acc;
-          }, {});
-
-          setSmokehouseStatus({ ...statusData });
-
-          // Update probe temperatures
-          setProbes((prevProbes) =>
-            prevProbes.map(probe => {
-              const matchingSensor = data.find(sensor => sensor[probe.id] !== undefined);
-              return matchingSensor ? { ...probe, temperature: matchingSensor[probe.id] } : probe;
-            })
-          );
-        } else {
-          console.warn('No data received from API');
+        if (!isSessionActive && data.length > 0) {
+          setIsSessionActive(true);
+          setSessionStartTime(new Date());
         }
+
+        // Extract smokehouse status from the response data
+        const statusData = data.reduce((acc, curr) => {
+          if ('internal_temp' in curr) acc.internal = curr.internal_temp;
+          if ('top_temp' in curr) acc.top = curr.top_temp;
+          if ('middle_temp' in curr) acc.middle = curr.middle_temp;
+          if ('bottom_temp' in curr) acc.bottom = curr.bottom_temp;
+          if ('humidity' in curr) acc.humidity = curr.humidity;
+          if ('smoke_ppm' in curr) acc.smokePPM = curr.smoke_ppm;
+          return acc;
+        }, {});
+
+        setSmokehouseStatus({ ...statusData });
+
+        // Update probe temperatures
+        setProbes((prevProbes) =>
+          prevProbes.map(probe => {
+            const matchingSensor = data.find(sensor => sensor[probe.id] !== undefined);
+            return matchingSensor ? { ...probe, temperature: matchingSensor[probe.id] } : probe;
+          })
+        );
       } catch (error) {
         console.error('Error fetching sensor data:', error.message);
       }
@@ -152,32 +143,35 @@ function App() {
 
       <div className="layout-container">
         <div className="left-column">
-          <div className="probe-card">
-            <h3>Smokehouse Status</h3>
-            <p>Internal: {smokehouseStatus.internal !== null ? smokehouseStatus.internal : 'N/A'}</p>
-            <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>
-            <p>Middle: {smokehouseStatus.middle !== null ? smokehouseStatus.middle : 'N/A'}</p>
-            <p>Bottom: {smokehouseStatus.bottom !== null ? smokehouseStatus.bottom : 'N/A'}</p>
-            <p>Humidity: {smokehouseStatus.humidity !== null ? smokehouseStatus.humidity : 'N/A'}</p>
-            <p>Smoke PPM: {smokehouseStatus.smokePPM !== null ? smokehouseStatus.smokePPM : 'N/A'}</p>
+          <div className="smokehouse-status-container" style={{ display: 'flex', alignItems: 'flex-start' }}>
+            <div className="probe-card" style={{ marginRight: '10px' }}>
+              <h3>Smokehouse Status</h3>
+              <p>Internal: {smokehouseStatus.internal !== null ? smokehouseStatus.internal : 'N/A'}</p>
+              <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>
+              <p>Middle: {smokehouseStatus.middle !== null ? smokehouseStatus.middle : 'N/A'}</p>
+              <p>Bottom: {smokehouseStatus.bottom !== null ? smokehouseStatus.bottom : 'N/A'}</p>
+              <p>Humidity: {smokehouseStatus.humidity !== null ? smokehouseStatus.humidity : 'N/A'}</p>
+              <p>Smoke PPM: {smokehouseStatus.smokePPM !== null ? smokehouseStatus.smokePPM : 'N/A'}</p>
+            </div>
+            <div className="smokehouse-chart-container" style={{ flex: 1 }}>
+              {sensorData && sensorData.length > 0 && <Chart data={sensorData} />} {/* Updated Chart component */}
+            </div>
           </div>
 
+          {/* Render Probe Cards and Probe Charts */}
           {probes && probes.length > 0 && probes.map((probe) => (
-            <ProbeCard
-              key={probe.id}
-              probe={probe}
-              onSetAlert={handleSetAlert}
-              onMeatChange={handleMeatChange}
-              meatTypes={assignedMeat || []}
-              minTemp={0}
-              maxTemp={300}
-              temperature={probe.temperature}
-            />
+            <div key={probe.id} className="probe-container" style={{ display: 'flex', alignItems: 'center' }}>
+              <ProbeCard
+                probe={probe}
+                onSetAlert={handleSetAlert}
+                onMeatChange={handleMeatChange}
+                meatTypes={assignedMeat || []}
+              />
+              <div className="probe-chart-container" style={{ flex: 1, marginLeft: '10px' }}>
+                <ProbeChart probe={probe} data={sensorData} /> {/* Updated path for ProbeChart */}
+              </div>
+            </div>
           ))}
-        </div>
-
-        <div className="right-column">
-          {sensorData && sensorData.length > 0 && <Chart data={sensorData} />}
         </div>
       </div>
 
