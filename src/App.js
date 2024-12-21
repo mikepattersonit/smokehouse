@@ -130,26 +130,41 @@ function App() {
     });
   };
 
-  const handleMeatChange = async (id, meatType, meatWeight) => {
-    setProbes((prevProbes) =>
-      prevProbes.map((probe) =>
-        probe.id === id ? { ...probe, meatType, meatWeight } : probe
-      )
-    );
+ const handleMeatChange = async (id, meatType, meatWeight) => {
+  setProbes((prevProbes) =>
+    prevProbes.map((probe) =>
+      probe.id === id ? { ...probe, meatType, meatWeight } : probe
+    )
+  );
 
-    try {
-      // Save meat assignment to the database via the new endpoint
-      await axios.post(probeAssignmentEndpoint, {
-        probeId: id,
-        meatType,
-        meatWeight,
-        sessionId: '12345', // Use appropriate session ID
-      });
-      console.log('Probe assignment saved successfully');
-    } catch (error) {
-      console.error('Error saving probe assignment:', error.message);
-    }
-  };
+  try {
+    console.log('Fetching the latest session ID...');
+    
+    const dynamodb = new AWS.DynamoDB.DocumentClient();
+    const sessionResponse = await dynamodb.scan({
+      TableName: 'sensor_data',
+      ProjectionExpression: 'session_id',
+    }).promise();
+
+    // Find the latest session ID
+    const sessionIds = sessionResponse.Items.map(item => parseInt(item.session_id, 10));
+    const maxSessionId = Math.max(...sessionIds);
+    console.log('Latest session ID:', maxSessionId);
+
+    // Save the meat assignment with the dynamic session ID
+    await axios.post(probeAssignmentEndpoint, {
+      probeId: id,
+      meatType,
+      meatWeight,
+      sessionId: maxSessionId, // Dynamically use the latest session ID
+    });
+
+    console.log('Probe assignment saved successfully');
+  } catch (error) {
+    console.error('Error saving probe assignment:', error.message);
+  }
+};
+
 
   return (
     <div className="app-container">
