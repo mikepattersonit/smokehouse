@@ -60,7 +60,7 @@ function App() {
     const fetchSensorData = async () => {
       try {
         console.log('Fetching sensor data from API...');
-        const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
+        const response = await axios.get(`${apiEndpoint}?session_id=maxSessionId`, {
           headers: { 'Content-Type': 'application/json' },
         });
         if (response.status !== 200) {
