@@ -71,10 +71,8 @@ function App() {
   useEffect(() => {
     const fetchSensorData = async () => {
       try {
-        const maxSessionId = await fetchMaxSessionId();
-        console.log('Max Session ID:', maxSessionId);
-
-        const response = await axios.get(`${apiEndpoint}?session_id=${maxSessionId}`, {
+        console.log('Fetching sensor data from API...');
+        const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
           headers: { 'Content-Type': 'application/json' },
         });
 
@@ -146,21 +144,20 @@ function App() {
     );
   };
 
-  const handleMeatChange = async (id, meatType, meatWeight) => {
-    setProbes((prevProbes) =>
-      prevProbes.map((probe) =>
-        probe.id === id ? { ...probe, meatType, meatWeight } : probe
-      )
-    );
+ const handleMeatChange = async (id, meatType, meatWeight) => {
+  setProbes((prevProbes) =>
+    prevProbes.map((probe) =>
+      probe.id === id ? { ...probe, meatType, meatWeight } : probe
+    )
+  );
 
     try {
-      const maxSessionId = await fetchMaxSessionId();
-
+      // Save meat assignment to the database via the new endpoint
       await axios.post(probeAssignmentEndpoint, {
         probeId: id,
         meatType,
         meatWeight,
-        sessionId: maxSessionId,
+        sessionId: '12345', // Use appropriate session ID
       });
       console.log('Probe assignment saved successfully');
     } catch (error) {
