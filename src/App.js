@@ -1,4 +1,4 @@
-// App.js (Updated)
+// App.js (Corrected and Complete)
 import React, { useState, useEffect } from 'react';
 import AWS from 'aws-sdk';
 import './App.css';
@@ -16,7 +16,7 @@ const sns = new AWS.SNS();
 const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors';
 const topicArn = 'arn:aws:sns:us-east-2:623626440685:SmokehouseAlerts';
 const meatTypesEndpoint = 'https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com/meatTypes';
-const probeAssignmentEndpoint = 'https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignment'; // New endpoint for probe assignment
+const probeAssignmentEndpoint = 'https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignment';
 
 function App() {
   const [sensorData, setSensorData] = useState([]);
@@ -36,8 +36,20 @@ function App() {
     middle: null,
     bottom: null,
     humidity: null,
-    smokePPM: null
+    smokePPM: null,
   });
+
+  // Reusable function to fetch the latest session ID
+  const fetchMaxSessionId = async () => {
+    const dynamodb = new AWS.DynamoDB.DocumentClient();
+    const sessionResponse = await dynamodb.scan({
+      TableName: 'sensor_data', // Ensure this matches your table name
+      ProjectionExpression: 'session_id',
+    }).promise();
+
+    const sessionIds = sessionResponse.Items.map(item => parseInt(item.session_id, 10));
+    return Math.max(...sessionIds); // Return the latest session ID
+  };
 
   useEffect(() => {
     const fetchMeatTypes = async () => {
@@ -63,9 +75,11 @@ function App() {
         const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
           headers: { 'Content-Type': 'application/json' },
         });
+
         if (response.status !== 200) {
           throw new Error(`API error: ${response.statusText}`);
         }
+
         const data = response.data;
         setSensorData(data);
         setLastMessageTime(new Date());
@@ -75,7 +89,6 @@ function App() {
           setSessionStartTime(new Date());
         }
 
-        // Extract smokehouse status from the response data
         const statusData = data.reduce((acc, curr) => {
           if ('internal_temp' in curr) acc.outside = curr.internal_temp;
           if ('top_temp' in curr) acc.top = curr.top_temp;
@@ -88,7 +101,6 @@ function App() {
 
         setSmokehouseStatus({ ...statusData });
 
-        // Update probe temperatures
         setProbes((prevProbes) =>
           prevProbes.map(probe => {
             const matchingSensor = data.find(sensor => sensor[probe.id] !== undefined);
@@ -111,31 +123,33 @@ function App() {
       )
     );
 
-    // Update alerts state
     setAlerts((prevAlerts) => [
       ...prevAlerts,
-      { probeId: id, min, max, probeName: `Probe ${id}`, active: true }
+      { probeId: id, min, max, probeName: `Probe ${id}`, active: true },
     ]);
 
-    sns.publish({
-      Message: `Alert set for Probe ${id}: Min=${min}, Max=${max}`,
-      PhoneNumber: mobileNumber,
-      TopicArn: topicArn,
-    }, (err, data) => {
-      if (err) {
-        console.error('Error sending alert:', err);
-      } else {
-        console.log('Alert sent successfully:', data);
+    sns.publish(
+      {
+        Message: `Alert set for Probe ${id}: Min=${min}, Max=${max}`,
+        PhoneNumber: mobileNumber,
+        TopicArn: topicArn,
+      },
+      (err, data) => {
+        if (err) {
+          console.error(`Error sending alert for Probe ${id}:`, err.message);
+        } else {
+          console.log(`Alert sent successfully for Probe ${id}:`, data);
+        }
       }
-    });
+    );
   };
 
-  const handleMeatChange = async (id, meatType, meatWeight) => {
-    setProbes((prevProbes) =>
-      prevProbes.map((probe) =>
-        probe.id === id ? { ...probe, meatType, meatWeight } : probe
-      )
-    );
+ const handleMeatChange = async (id, meatType, meatWeight) => {
+  setProbes((prevProbes) =>
+    prevProbes.map((probe) =>
+      probe.id === id ? { ...probe, meatType, meatWeight } : probe
+    )
+  );
 
     try {
       // Save meat assignment to the database via the new endpoint
@@ -158,7 +172,7 @@ function App() {
       <div className="layout-container">
         <div className="left-column">
           <div className="smokehouse-status-container" style={{ display: 'flex', alignItems: 'flex-start' }}>
-            <div className="probe-card" style={{marginLeft: '20px', marginRight: '10px' }}>
+            <div className="probe-card" style={{ marginLeft: '20px', marginRight: '10px' }}>
               <h3>Smokehouse Status</h3>
               <p>Outside Temp: {smokehouseStatus.outside !== null ? smokehouseStatus.outside : 'N/A'}</p>
               <p>Top: {smokehouseStatus.top !== null ? smokehouseStatus.top : 'N/A'}</p>
@@ -172,7 +186,6 @@ function App() {
             </div>
           </div>
 
-          {/* Render Probe Cards and Probe Charts */}
           {probes && probes.length > 0 && probes.map((probe) => (
             <div key={probe.id} className="probe-container" style={{ display: 'flex', alignItems: 'center' }}>
               <ProbeCard
@@ -182,7 +195,7 @@ function App() {
                 meatTypes={assignedMeat || []}
               />
               <div className="probe-chart-container" style={{ flex: 1, marginLeft: '10px' }}>
-                <ProbeChart probe={probe} data={sensorData} /> {/* Updated path for ProbeChart */}
+                <ProbeChart probe={probe} data={sensorData} />
               </div>
             </div>
           ))}
