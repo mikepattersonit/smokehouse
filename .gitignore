@@ -39,3 +39,9 @@ lambdas/*/.venv/
 lambdas/*/.pytest_cache/
 lambdas/*/__pycache__/
 lambdas/*/*.zip
+
+# IAM inventory (local only)
+cloud-inventory/iam/
+
+# IAM inventory (local only)
+cloud-inventory/iam/
