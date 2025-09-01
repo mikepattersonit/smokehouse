@@ -32,3 +32,10 @@ cloud-inventory.local/
 
 # editor backups
 *.bak
+
+# Lambda vendor dirs / bundles
+lambdas/*/node_modules/
+lambdas/*/.venv/
+lambdas/*/.pytest_cache/
+lambdas/*/__pycache__/
+lambdas/*/*.zip
