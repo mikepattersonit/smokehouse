@@ -29,3 +29,6 @@ firmware/credentials.h
 # never commit inventory
 cloud-inventory/
 cloud-inventory.local/
+
+# editor backups
+*.bak
