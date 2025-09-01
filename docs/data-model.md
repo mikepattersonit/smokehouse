@@ -1,6 +1,6 @@
 # DynamoDB Data Model
 
-_Generated from local inventory in `cloud-inventory` on 2025-09-01T22:21:04Z._ 
+_Generated from local inventory in `cloud-inventory` on 2025-09-01T22:25:47Z._ 
 
 ## Table: `ProbeAssignments`
 
