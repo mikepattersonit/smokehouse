@@ -1,0 +1,9 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "ReadSensorDataBySession",
+    "Effect": "Allow",
+    "Action": ["dynamodb:Query"],
+    "Resource": ["arn:aws:dynamodb:us-east-2:623626440685:table/sensor_data", "arn:aws:dynamodb:us-east-2:623626440685:table/sensor_data/index/*"]
+  }]
+}
