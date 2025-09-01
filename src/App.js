@@ -1,3 +1,4 @@
+import LiveSensors from "./components/LiveSensors";
 // App.js (Corrected and Complete)
 import React, { useState, useEffect } from 'react';
 import AWS from 'aws-sdk';
@@ -16,7 +17,8 @@ const sns = new AWS.SNS();
 const apiEndpoint = 'https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com/sensors';
 const topicArn = 'arn:aws:sns:us-east-2:623626440685:SmokehouseAlerts';
 const meatTypesEndpoint = 'https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com/meatTypes';
-const probeAssignmentEndpoint = 'https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignment';
+const probeAssignmentEndpoint = 'https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments';
+const SESSION_ID = process.env.REACT_APP_DEFAULT_SESSION_ID || '20250831204510';
 
 function App() {
   const [sensorData, setSensorData] = useState([]);
@@ -72,7 +74,7 @@ function App() {
     const fetchSensorData = async () => {
       try {
         console.log('Fetching sensor data from API...');
-        const response = await axios.get(`${apiEndpoint}?session_id=12345`, {
+        const response = await axios.get(`${apiEndpoint}?session_id=${SESSION_ID}`, {
           headers: { 'Content-Type': 'application/json' },
         });
 
@@ -114,6 +116,7 @@ function App() {
 
     const interval = setInterval(fetchSensorData, 5000);
     return () => clearInterval(interval);
+    <LiveSensors />
   }, [isSessionActive]);
 
   const handleSetAlert = (id, min, max, mobileNumber) => {
