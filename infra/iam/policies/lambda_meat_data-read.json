@@ -1,0 +1,9 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "ReadMeatTypes",
+    "Effect": "Allow",
+    "Action": ["dynamodb:GetItem","dynamodb:Query","dynamodb:Scan"],
+    "Resource": ["arn:aws:dynamodb:us-east-2:623626440685:table/meat_types", "arn:aws:dynamodb:us-east-2:623626440685:table/meat_types/index/*"]
+  }]
+}
