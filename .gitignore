@@ -25,3 +25,7 @@ firmware/credentials.h
 .vscode/
 .idea/
 # ---- end smokehouse block ----
+
+# never commit inventory
+cloud-inventory/
+cloud-inventory.local/
