@@ -1,1 +1,27 @@
 node_modules
+
+# ---- smokehouse standard ignores ----
+# Node / React
+node_modules/
+dist/
+build/
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Firmware secrets & certs
+firmware/credentials.h
+*.pem
+*.crt
+*.der
+*.key
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+# ---- end smokehouse block ----
