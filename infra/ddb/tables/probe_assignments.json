@@ -1,0 +1,12 @@
+{
+  "TableName": "probe_assignments",
+  "BillingMode": "PAY_PER_REQUEST",
+  "AttributeDefinitions": [
+    { "AttributeName": "session_id", "AttributeType": "S" },
+    { "AttributeName": "probe_id",   "AttributeType": "S" }
+  ],
+  "KeySchema": [
+    { "AttributeName": "session_id", "KeyType": "HASH" },
+    { "AttributeName": "probe_id",   "KeyType": "RANGE" }
+  ]
+}
