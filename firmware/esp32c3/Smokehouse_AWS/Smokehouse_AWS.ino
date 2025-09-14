@@ -240,36 +240,149 @@ void readSmokeSensor() {
 }
 
 // ===== LCD =====
-void updateLCD() {
-  static int prevOutside = -999, prevTop = -999, prevMid = -999, prevBot = -999;
-  static int prevP1 = -999, prevP2 = -999, prevP3 = -999;
+// ======== LCD paging config ========
+static const unsigned long PAGE_INTERVAL_MS = 5000; // 5s per page
+static const uint8_t LCD_COLS = 20;
+static const uint8_t LCD_ROWS = 4;
 
-  auto printValue = [](int col, int row, const String& label, int value, int prevValue) {
-    if (value != prevValue) {
-      String clearString = label + "    ";
-      lcd.setCursor(col, row); lcd.print(clearString);
-      lcd.setCursor(col, row);
-      if (value == -999) lcd.print(label + "-");
-      else               lcd.print(label + String(value) + "F");
-    }
-  };
+static const uint8_t RIGHT_COL = 11;   // start column for right-side items on Env page
+static const int INVALID_SENTINEL = -999;
 
-  printValue(0, 0,  "Out:", (int)outsideTemp, prevOutside);
-  printValue(0, 1,  "Top:", (int)Temps[2],   prevTop);
-  printValue(0, 2,  "Mid:", (int)Temps[1],   prevMid);
-  printValue(0, 3,  "Bot:", (int)Temps[0],   prevBot);
-  printValue(11, 1, "P1:",  (int)Temps[4],   prevP1);
-  printValue(11, 2, "P2:",  (int)Temps[5],   prevP2);
-  printValue(11, 3, "P3:",  (int)Temps[6],   prevP3);
+// Probe mapping: where "probe1..probeN" live in Temps[]
+// Today: probe1=Temps[4], probe2=Temps[5], probe3=Temps[6].
+// If you add more later (up to 5), extend this array.
+static const uint8_t PROBE_INDEXES[] = {4, 5, 6 /* , 7, 8 */};
+static const uint8_t MAX_PROBES_ON_LCD = 5;   // future-proof UI
 
-  prevOutside = (int)outsideTemp;
-  prevTop     = (int)Temps[2];
-  prevMid     = (int)Temps[1];
-  prevBot     = (int)Temps[0];
-  prevP1      = (int)Temps[4];
-  prevP2      = (int)Temps[5];
-  prevP3      = (int)Temps[6];
+// State for paging
+static unsigned long s_lastPageSwitch = 0;
+static bool s_showEnvPage = true;     // toggles Env <-> Probes
+static uint8_t s_probeSubpage = 0;    // for >4 probes
+
+// ---------- tiny helpers ----------
+static inline uint8_t minU8(uint8_t a, uint8_t b) { return (a < b) ? a : b; }
+
+static inline bool isValidTemp(double v) {
+  return !isnan(v) && (int)v != INVALID_SENTINEL;
 }
+
+static inline String fmtTemp(double v) {
+  if (!isValidTemp(v)) return "-";
+  int iv = (int)round(v);
+  if (iv < 0)   iv = 0;
+  if (iv > 999) iv = 999;   // fits width
+  // You can use (char)223 for ° on many HD44780, but plain 'F' is safest:
+  return String(iv) + "F";
+}
+
+static inline String fmtPPM(double v) {
+  if (isnan(v)) return "-";
+  double x = constrain(v, 0.0, 9999.9);
+  char b[8];
+  snprintf(b, sizeof(b), "%.1f", x);  // one decimal
+  return String(b);
+}
+
+static inline String fmtPct(double v) {
+  if (isnan(v)) return "-";
+  int p = (int)round(constrain(v, 0, 100));
+  String s;
+  if (p < 10) s = "  " + String(p) + "%";
+  else if (p < 100) s = " " + String(p) + "%";
+  else s = String(p) + "%";
+  return s;
+}
+
+// write fixed-width text (pads/truncates) to avoid ghosting
+static void writeFixed(uint8_t col, uint8_t row, const String& s, uint8_t width) {
+  String out = s;
+  if (out.length() < width) {
+    uint8_t pad = width - out.length();
+    for (uint8_t i = 0; i < pad; ++i) out += ' ';   // <-- FIX: pad with loop
+  } else if (out.length() > width) {
+    out.remove(width);
+  }
+  lcd.setCursor(col, row);
+  lcd.print(out);
+}
+
+// ---------- page renderers ----------
+static void renderEnvPage() {
+  // Left column (0..9): Out, Top, Mid, Bot
+  writeFixed(0, 0, "Out: " + fmtTemp(outsideTemp), 10);
+  writeFixed(0, 1, "Top: " + fmtTemp(Temps[2]),    10);
+  writeFixed(0, 2, "Mid: " + fmtTemp(Temps[1]),    10);
+  writeFixed(0, 3, "Bot: " + fmtTemp(Temps[0]),    10);
+
+  // Right column (11..19): Smoke, Humidity
+  writeFixed(RIGHT_COL, 0, "Smk:" + fmtPPM(smokePPM), LCD_COLS - RIGHT_COL);
+  writeFixed(RIGHT_COL, 1, "Hum:" + fmtPct(humidity),  LCD_COLS - RIGHT_COL);
+  writeFixed(RIGHT_COL, 2, "",                         LCD_COLS - RIGHT_COL);
+  writeFixed(RIGHT_COL, 3, "",                         LCD_COLS - RIGHT_COL);
+}
+
+static void renderProbePage() {
+  const uint8_t totalConfigured = (uint8_t)(sizeof(PROBE_INDEXES) / sizeof(PROBE_INDEXES[0]));
+  const uint8_t totalProbes = minU8(totalConfigured, MAX_PROBES_ON_LCD);
+
+  // Pagination: 4 probes per screen (2 columns x 2 rows), remainder on next subpage
+  const uint8_t perPage = 4;
+  const uint8_t pages = (totalProbes + perPage - 1) / perPage;
+  if (s_probeSubpage >= pages) s_probeSubpage = 0;
+
+  const uint8_t startIdx = s_probeSubpage * perPage;
+  const uint8_t endIdx   = (startIdx + perPage <= totalProbes) ? (startIdx + perPage) : totalProbes;
+
+  // Slots 0..3 laid out as:
+  // slot 0 -> (0,0), slot 1 -> (10,0), slot 2 -> (0,1), slot 3 -> (10,1)
+  for (uint8_t slot = 0; slot < perPage; ++slot) {
+    uint8_t row = (slot < 2) ? 0 : 1;
+    uint8_t col = (slot % 2 == 0) ? 0 : 10;
+
+    uint8_t i = startIdx + slot;
+    if (i < endIdx) {
+      uint8_t probeNum = (i + 1); // P1..Pn
+      uint8_t tIndex   = PROBE_INDEXES[i];
+      String label = "P" + String(probeNum) + ": ";
+      writeFixed(col, row, label + fmtTemp(Temps[tIndex]), 10);
+    } else {
+      writeFixed(col, row, "", 10); // blank unused slot
+    }
+  }
+
+  // Footer (row 3): page indicator e.g. "Probes 1/2"
+  if (pages > 1) {
+    String footer = "Probes " + String(s_probeSubpage + 1) + "/" + String(pages);
+    writeFixed(0, 3, footer, LCD_COLS);
+  } else {
+    writeFixed(0, 3, "", LCD_COLS);
+  }
+}
+
+// Call this repeatedly from loop()
+void updateLCD() {
+  const unsigned long now = millis();
+
+  // Switch page every PAGE_INTERVAL_MS
+  if (now - s_lastPageSwitch >= PAGE_INTERVAL_MS) {
+    s_lastPageSwitch = now;
+    // flip/flop env <-> probes
+    if (s_showEnvPage) {
+      // leaving Env -> entering Probes (don’t bump subpage yet)
+      s_showEnvPage = false;
+    } else {
+      // leaving Probes -> entering Env (advance subpage for next Probes view)
+      s_showEnvPage = true;
+      s_probeSubpage++;
+    }
+    lcd.clear(); // clear only on page switch to avoid flicker
+  }
+
+  if (s_showEnvPage) renderEnvPage();
+  else               renderProbePage();
+}
+
+
 
 // ===== Publish =====
 void publishMQTT() {

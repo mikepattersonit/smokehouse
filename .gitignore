@@ -46,3 +46,4 @@ cloud-inventory/iam/
 # IAM inventory (local only)
 cloud-inventory/iam/
 cloud-inventory/ddb/
+credentials.h
