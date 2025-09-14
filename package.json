@@ -11,7 +11,7 @@
   "dependencies": {
     "aws-amplify": "^6.10.0",
     "aws-sdk": "^2.1692.0",
-    "axios": "^1.7.8",
+    "axios": "^1.12.2",
     "chart.js": "^4.4.6",
     "react": "^18.2.0",
     "react-chartjs-2": "^5.2.0",
