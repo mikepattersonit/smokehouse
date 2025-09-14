@@ -1,0 +1,41 @@
+{
+  "apiId": "o05rs5z8e1",
+  "stages": [
+    {
+      "AutoDeploy": true,
+      "CreatedDate": "2024-12-03T17:35:58+00:00",
+      "DefaultRouteSettings": {
+        "DetailedMetricsEnabled": false
+      },
+      "DeploymentId": "luofkp",
+      "LastDeploymentStatusMessage": "Successfully deployed stage with deployment ID 'luofkp'",
+      "LastUpdatedDate": "2024-12-03T17:38:44+00:00",
+      "RouteSettings": {},
+      "StageName": "$default",
+      "StageVariables": {},
+      "Tags": {}
+    }
+  ],
+  "routes": [
+    {
+      "ApiKeyRequired": false,
+      "AuthorizationScopes": [],
+      "AuthorizationType": "NONE",
+      "RequestParameters": {},
+      "RouteId": "04ahz9l",
+      "RouteKey": "GET /meatTypes",
+      "Target": "integrations/2m929n2"
+    }
+  ],
+  "integrations": [
+    {
+      "ConnectionType": "INTERNET",
+      "IntegrationId": "2m929n2",
+      "IntegrationMethod": "POST",
+      "IntegrationType": "AWS_PROXY",
+      "IntegrationUri": "arn:aws:lambda:us-east-2:623626440685:function:lambda_meat_data",
+      "PayloadFormatVersion": "2.0",
+      "TimeoutInMillis": 30000
+    }
+  ]
+}

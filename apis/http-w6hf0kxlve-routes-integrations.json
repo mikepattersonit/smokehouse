@@ -1,0 +1,41 @@
+{
+  "apiId": "w6hf0kxlve",
+  "stages": [
+    {
+      "AutoDeploy": true,
+      "CreatedDate": "2024-11-30T01:41:10+00:00",
+      "DefaultRouteSettings": {
+        "DetailedMetricsEnabled": false
+      },
+      "DeploymentId": "s3qmgf",
+      "LastDeploymentStatusMessage": "Successfully deployed stage with deployment ID 's3qmgf'",
+      "LastUpdatedDate": "2024-11-30T01:57:57+00:00",
+      "RouteSettings": {},
+      "StageName": "$default",
+      "StageVariables": {},
+      "Tags": {}
+    }
+  ],
+  "routes": [
+    {
+      "ApiKeyRequired": false,
+      "AuthorizationScopes": [],
+      "AuthorizationType": "NONE",
+      "RequestParameters": {},
+      "RouteId": "5rm4ykq",
+      "RouteKey": "GET /sensors",
+      "Target": "integrations/cjdaj1r"
+    }
+  ],
+  "integrations": [
+    {
+      "ConnectionType": "INTERNET",
+      "IntegrationId": "cjdaj1r",
+      "IntegrationMethod": "POST",
+      "IntegrationType": "AWS_PROXY",
+      "IntegrationUri": "arn:aws:lambda:us-east-2:623626440685:function:fetchSensorData",
+      "PayloadFormatVersion": "2.0",
+      "TimeoutInMillis": 30000
+    }
+  ]
+}

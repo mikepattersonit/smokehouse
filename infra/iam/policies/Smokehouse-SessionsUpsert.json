@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StreamReadSpecific",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeStream",
+        "dynamodb:GetShardIterator",
+        "dynamodb:GetRecords"
+      ],
+      "Resource": ["arn:aws:dynamodb:us-east-2:623626440685:table/sensor_data/stream/2025-09-14T16:06:51.717"]
+    },
+    {
+      "Sid": "ListStreamsGlobal",
+      "Effect": "Allow",
+      "Action": ["dynamodb:ListStreams"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "WriteSessions",
+      "Effect": "Allow",
+      "Action": ["dynamodb:PutItem","dynamodb:UpdateItem","dynamodb:GetItem"],
+      "Resource": ["arn:aws:dynamodb:us-east-2:623626440685:table/sessions"]
+    }
+  ]
+}

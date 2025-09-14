@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadSpecificParameter",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter"],
+      "Resource": "arn:aws:ssm:us-east-2:623626440685:parameter/smokehouse/openai/api_key"
+    },
+    {
+      "Sid": "KmsDecryptViaSsm",
+      "Effect": "Allow",
+      "Action": ["kms:Decrypt"],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "ssm.us-east-2.amazonaws.com"
+        }
+      }
+    }
+  ]
+}
