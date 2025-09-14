@@ -1,70 +1,51 @@
-import os, sys, re, time, json
-from datetime import datetime, timezone
-import boto3
-from botocore.config import Config
+import os, boto3, time
+from boto3.dynamodb.conditions import Key, Attr
 
-SENSOR_TABLE = os.environ.get("SENSOR_TABLE", "sensor_data")
-SESSIONS_TABLE = os.environ.get("SESSIONS_TABLE", "sessions")
+REGION = os.environ.get("AWS_REGION", "us-east-2")
+TABLE_SENSOR = os.environ.get("TABLE_SENSOR", "sensor_data")
+TABLE_SESS   = os.environ.get("TABLE_SESS", "sessions")
 
-def parse_session_start(sess_id: str):
-    """
-    Expect 'YYYYMMDDhhmmss' (14 digits) — return epoch seconds.
-    If format unexpected, return None.
-    """
-    if not re.fullmatch(r"\d{14}", sess_id or ""):
-        return None
-    dt = datetime.strptime(sess_id, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-    return int(dt.timestamp())
+ddb = boto3.resource("dynamodb", region_name=REGION)
+t_sensors = ddb.Table(TABLE_SENSOR)
+t_sessions = ddb.Table(TABLE_SESS)
 
 def main():
-    cfg = Config(retries={"max_attempts": 10, "mode": "standard"})
-    ddb = boto3.resource("dynamodb", config=cfg)
-    sensor = ddb.Table(SENSOR_TABLE)
-    sessions = ddb.Table(SESSIONS_TABLE)
-
-    print(f"Scanning table: {SENSOR_TABLE} (projection: session_id)")
+    print(f"Scanning table: {TABLE_SENSOR} (projection: session_id)")
     seen = set()
     scan_kwargs = {"ProjectionExpression": "session_id"}
     while True:
-        resp = sensor.scan(**scan_kwargs)
+        resp = t_sensors.scan(**scan_kwargs)
         for item in resp.get("Items", []):
-            sid = item.get("session_id")
-            if sid is None:
-                continue
-            # coerce to string
-            sid = str(sid)
-            seen.add(sid)
-
+            sid = str(item.get("session_id", "")).strip()
+            if sid:
+                seen.add(sid)
         if "LastEvaluatedKey" in resp:
             scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
         else:
             break
 
-    print(f"Found {len(seen)} unique session_id(s). Upserting into '{SESSIONS_TABLE}'…")
+    print(f"Found {len(seen)} unique session_id(s). Upserting into '{TABLE_SESS}'…")
+    inserted = 0
+    skipped = 0
+    now = int(time.time())
 
-    put_count = 0
-    skip_count = 0
-    for sid in sorted(seen):
-        started_at = parse_session_start(sid)
-        now = int(time.time())
-        item = {
-            "session_id": sid,            # PK
-            "status": "unknown",          # we’ll set active/ended later
-            "created_at": now,            # backfill timestamp
-        }
-        if started_at is not None:
-            item["started_at"] = started_at
-
+    for sid in seen:
+        # try to create item if not exists
         try:
-            sessions.put_item(
-                Item=item,
-                ConditionExpression="attribute_not_exists(session_id)"  # don’t overwrite
+            t_sessions.put_item(
+                Item={
+                    "session_id": sid,
+                    "started_at": now,          # best-effort; will be corrected by stream upserter later
+                    "created_at": now,
+                    "status": "unknown",
+                },
+                ConditionExpression="attribute_not_exists(session_id)"
             )
-            put_count += 1
-        except sessions.meta.client.exceptions.ConditionalCheckFailedException:
-            skip_count += 1
+            inserted += 1
+        except Exception:
+            skipped += 1
 
-    print(json.dumps({"inserted": put_count, "skipped_existing": skip_count}, indent=2))
+    print({"inserted": inserted, "skipped_existing": skipped})
 
 if __name__ == "__main__":
     main()
