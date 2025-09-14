@@ -1,10 +1,22 @@
 version: 2
 updates:
+  # Root frontend (package.json at repo root)
   - package-ecosystem: "npm"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule:
+      interval: "weekly"
     target-branch: "dev"
+
+  # If you keep a second frontend folder:
+  - package-ecosystem: "npm"
+    directory: "/front-end"
+    schedule:
+      interval: "weekly"
+    target-branch: "dev"
+
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule:
+      interval: "weekly"
     target-branch: "dev"
