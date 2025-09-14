@@ -9,14 +9,15 @@ import { fetchLatestSession, fetchSensors, fetchItemTypes } from "./api";
 import axios from "axios";
 
 const POLL_MS = 15000; // 15s
-const probeAssignmentEndpoint =
+// Full URL to your API route that saves probe assignments
+const PROBE_ASSIGNMENT_URL =
   "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
 export default function App() {
   // Data
   const [sessionId, setSessionId] = useState("");
   const [sensorData, setSensorData] = useState([]);
-  const [itemTypes, setItemTypes] = useState([]); // formerly "meat types"
+  const [itemTypes, setItemTypes] = useState([]); // formerly “meat types”
   const [alerts, setAlerts] = useState([]);
 
   // UI state
@@ -25,19 +26,45 @@ export default function App() {
   const timerRef = useRef(null);
   const inFlightRef = useRef(false);
 
-  // Probes (rename-able per session; temps are hydrated from latest sample)
+  // Probes (rename-able per session; temps hydrated from latest sample)
   const [probes, setProbes] = useState([
-    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", mobileNumber: "", itemType: "", itemWeight: "", temperature: null },
-    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", mobileNumber: "", itemType: "", itemWeight: "", temperature: null },
-    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", mobileNumber: "", itemType: "", itemWeight: "", temperature: null },
+    {
+      id: "probe1_temp",
+      name: "Probe 1",
+      minAlert: "",
+      maxAlert: "",
+      mobileNumber: "",
+      itemType: "",
+      itemWeight: "",
+      temperature: null,
+    },
+    {
+      id: "probe2_temp",
+      name: "Probe 2",
+      minAlert: "",
+      maxAlert: "",
+      mobileNumber: "",
+      itemType: "",
+      itemWeight: "",
+      temperature: null,
+    },
+    {
+      id: "probe3_temp",
+      name: "Probe 3",
+      minAlert: "",
+      maxAlert: "",
+      mobileNumber: "",
+      itemType: "",
+      itemWeight: "",
+      temperature: null,
+    },
   ]);
 
-  // Latest (newest-first by timestamp)
+  // Newest sample
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
 
-  // “Smokehouse environment” derived from latest sample
+  // Derive smokehouse environment from newest sample
   const smokehouseStatus = useMemo(() => {
-    if (!latest) return {};
     return {
       outside: pickNum(latest.outside_temp, latest.internal_temp),
       top: pickNum(latest.top_temp),
@@ -48,7 +75,7 @@ export default function App() {
     };
   }, [latest]);
 
-  // --- helpers ---
+  // ---------- helpers ----------
   function pickNum(...vals) {
     for (const v of vals) {
       if (v === undefined || v === null) continue;
@@ -75,7 +102,7 @@ export default function App() {
       setSessionId(sid);
 
       const data = await fetchSensors(sid, 100);
-      // Sort newest-first by ISO-ish timestamp
+      // Sort newest-first by timestamp (string compare OK for your format)
       const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) => {
         const ta = String(a?.timestamp ?? "");
         const tb = String(b?.timestamp ?? "");
@@ -102,7 +129,7 @@ export default function App() {
     }
   }, [resolveSessionId]);
 
-  // Load item types once
+  // Load item types (once)
   useEffect(() => {
     let mounted = true;
     fetchItemTypes()
@@ -111,14 +138,14 @@ export default function App() {
         setItemTypes(Array.isArray(types) ? types : []);
       })
       .catch(() => {
-        // non-fatal
+        /* non-fatal */
       });
     return () => {
       mounted = false;
     };
   }, []);
 
-  // Polling for sensor data
+  // Poll sensors
   useEffect(() => {
     refreshData(); // immediate
     if (timerRef.current) clearInterval(timerRef.current);
@@ -138,14 +165,14 @@ export default function App() {
       ...prev,
       { probeId: id, min, max, probeName: nameForProbe(id), active: true, mobileNumber },
     ]);
-  }, []);
+  }, [probes]); // probes reference used in nameForProbe
 
   function nameForProbe(id) {
     const p = probes.find((x) => x.id === id);
     return p?.name || id;
   }
 
-  // Assign / update item on probe
+  // Assign / update item on a probe (parent owns persistence)
   const handleItemChange = useCallback(
     async (id, itemType, itemWeight) => {
       setProbes((prev) =>
@@ -154,14 +181,14 @@ export default function App() {
         )
       );
       try {
-        await axios.post(probeAssignmentEndpoint, {
+        await axios.post(PROBE_ASSIGNMENT_URL, {
           probeId: id,
           itemType,
           itemWeight,
           sessionId, // current session
         });
       } catch (e) {
-        // Non-fatal to UI; you’ll see in console for debugging
+        // non-fatal; shows in console for debugging
         // eslint-disable-next-line no-console
         console.error("Error saving probe assignment:", e?.message || e);
       }
@@ -211,13 +238,24 @@ export default function App() {
             <div
               key={probe.id}
               className="probe-container"
-              style={{ display: "flex", alignItems: "flex-start", gap: 12, marginTop: 16 }}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 12,
+                marginTop: 16,
+              }}
             >
               <ProbeCard
                 probe={probe}
                 onSetAlert={handleSetAlert}
+                onClearAlert={onClearAlert}
                 onMeatChange={(id, t, w) => handleItemChange(id, t, w)}
                 meatTypes={itemTypes || []}
+                // NOTE: we are not passing apiEndpoint here on purpose;
+                // App.js persists assignments itself to PROBE_ASSIGNMENT_URL.
+                // When your AI Advisor endpoint is ready, we’ll pass its base
+                // as a separate prop and call it from ProbeCard.
+                sessionId={sessionId}
               />
               <div className="probe-chart-container" style={{ flex: 1 }}>
                 <ProbeChart probe={probe} data={sensorData} />
