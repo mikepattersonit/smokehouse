@@ -1,3 +1,8 @@
+// Smokehouse_AWS.ino (ESP32-C3)
+// Session persistence (30m gap), UTC timestamps, 60s publish cadence,
+// device_id/firmware in payload, MUX bit fix, larger MQTT buffer.
+
+// ===== Includes =====
 #include <SPI.h>
 #include <Adafruit_MAX31855.h>
 #include <WiFi.h>
@@ -7,10 +12,13 @@
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <DHT.h>
-#include "credentials.h" // Ensure credentials.h is properly configured
 #include <PubSubClient.h>
+#include <Preferences.h>
+#include <time.h>
 
-// Sensor Configuration
+#include "credentials.h"  // Your SSID/password + AWS IoT: endpoint, port, certs, keys, topic, client id, etc.
+
+// ===== Pins / Sensors =====
 #define NUM_SENSORS 8
 #define I2C_SDA 4
 #define I2C_SCL 5
@@ -24,340 +32,338 @@
 #define MQ135_PIN 1
 #define DHTTYPE DHT11
 
-// MQTT Client Configuration
+// ===== Globals =====
 WiFiClientSecure wifiClient;
 PubSubClient mqttClient(wifiClient);
 
-// LCD and Sensors
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 Adafruit_MAX31855 thermocouple(MAXCLK, MAXCS, MAXDO);
 DHT dht(DHT_PIN, DHTTYPE);
+Preferences prefs;
 
-// Global Variables
 double Temps[NUM_SENSORS];
 double outsideTemp = 0.0;
-double humidity = 0.0;
-double smokePPM = 0.0;
+double humidity    = 0.0;
+double smokePPM    = 0.0;
+
 unsigned long lastSensorReadTime = 0;
-const unsigned long sensorReadInterval = 1000; // 1 second
+const unsigned long sensorReadInterval = 1000;   // read sensors ~1s
+
 unsigned long lastMqttSendTime = 0;
-const unsigned long mqttSendInterval = 5000; // 5 seconds
-uint8_t currentSensor = 0;  // Current sensor index
-String session_id;
+const unsigned long mqttSendInterval = 60000;    // publish every 60s
+
+uint8_t currentSensor = 0;
 bool waitingForConversion = false;
 unsigned long muxSwitchTime = 0;
 
+String session_id;
+String DEVICE_ID;
+const char* FIRMWARE_VERSION = "esp32c3-0.2.0";
 
-// Setup LCD
+const uint32_t SESSION_GAP_SECS = 1800;          // 30 minutes
+
+// ===== Helpers =====
+String macAsHex() {
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  char buf[13];
+  snprintf(buf, sizeof(buf), "%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(buf);
+}
+
 void setupLCD() {
-    lcd.init();
-    lcd.backlight();
-    lcd.setCursor(0, 0);
-    lcd.print("Smokehouse Booting");
-    delay(1000);
-    lcd.clear();
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0); lcd.print("Smokehouse Booting");
+  delay(1000);
+  lcd.clear();
 }
 
 void connectToWiFi() {
-    WiFi.begin(ssid, password);
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED && retries < 20) {
-        delay(500);
-        Serial.print(".");
-        retries++;
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("WiFi connected!");
-        Serial.print("IP Address: ");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println("WiFi connection failed!");
-        ESP.restart(); // Restart the device if Wi-Fi fails
-    }
+  WiFi.begin(ssid, password);
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < 40) {
+    delay(250);
+    retries++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("WiFi connected!");
+    Serial.print("IP: "); Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("WiFi connect failed; restarting…");
+    ESP.restart();
+  }
 }
 
-// Sync Time with NTP
 void syncTime() {
-    if (WiFi.status() != WL_CONNECTED) {
-        lcd.setCursor(0, 0);
-        lcd.print("WiFi not connected!");
-        Serial.println("WiFi not connected!");
-        return;
-    }
-
-    configTime(0, 0, "time.google.com", "time.windows.com");
-    time_t now = time(nullptr);
-    int retries = 0;
-
-    while (now < 1000000000 && retries < 30) {
-        lcd.setCursor(0, 0);
-        lcd.print("Time Syncing...");
-        Serial.println("Time Syncing...");
-        delay(1000);
-        now = time(nullptr);
-        retries++;
-    }
-
-    if (now >= 1000000000) {
-        lcd.setCursor(0, 0);
-        lcd.print("Time Synced!");
-        Serial.println("Time successfully synced.");
-    } else {
-        lcd.setCursor(0, 0);
-        lcd.print("Time Sync Failed!");
-        Serial.println("Failed to sync time.");
-    }
-
-    delay(1000);
-    lcd.clear();
-}
-String generateSessionId() {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-
-    char sessionId[20];
-    snprintf(sessionId, sizeof(sessionId), "%04d%02d%02d%02d%02d%02d",
-             timeinfo->tm_year + 1900, timeinfo->tm_mon + 1,
-             timeinfo->tm_mday, timeinfo->tm_hour,
-             timeinfo->tm_min, timeinfo->tm_sec);
-
-    return String(sessionId);
+  if (WiFi.status() != WL_CONNECTED) return;
+  // UTC (offset 0, no DST); NTP pools:
+  configTime(0, 0, "time.google.com", "time.windows.com", "pool.ntp.org");
+  time_t now = time(nullptr);
+  int retries = 0;
+  while (now < 1000000000 && retries < 60) {
+    delay(500);
+    now = time(nullptr);
+    retries++;
+  }
+  lcd.setCursor(0, 0);
+  if (now >= 1000000000) {
+    lcd.print("Time Synced (UTC) ");
+  } else {
+    lcd.print("Time Sync Failed  ");
+  }
+  delay(800);
+  lcd.clear();
 }
 
-String generateTimestamp() {
-    time_t now = time(nullptr);
-    struct tm* timeinfo = localtime(&now);
-
-    char timestamp[10];
-    snprintf(timestamp, sizeof(timestamp), "%02d%02d%02d",
-             timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-
-    return String(timestamp);
+String generateSessionIdUTC() {
+  time_t now = time(nullptr);
+  struct tm t; gmtime_r(&now, &t);
+  char buf[20];
+  // e.g. 20250914 180300 (YYYYMMDDHHMMSS)
+  snprintf(buf, sizeof(buf), "%04d%02d%02d%02d%02d%02d",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+           t.tm_hour, t.tm_min, t.tm_sec);
+  return String(buf);
 }
 
+String generateTimestampUTC() {
+  time_t now = time(nullptr);
+  struct tm t; gmtime_r(&now, &t);
+  char buf[18];
+  // e.g. 20250914T180300Z (sortable; matches backend expectations)
+  snprintf(buf, sizeof(buf), "%04d%02d%02dT%02d%02d%02dZ",
+           t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+           t.tm_hour, t.tm_min, t.tm_sec);
+  return String(buf);
+}
 
-// MQTT Callback
+String loadOrCreateSessionId() {
+  prefs.begin("smoke", false);
+  String saved = prefs.getString("session_id", "");
+  time_t last_seen = (time_t)prefs.getLong("last_seen", 0);
+  time_t now = time(nullptr);
+
+  if (saved.length() > 0 && now >= last_seen && ((now - last_seen) <= SESSION_GAP_SECS)) {
+    prefs.end();
+    return saved;  // reuse
+  }
+  String sid = generateSessionIdUTC();
+  prefs.putString("session_id", sid);
+  prefs.putLong("started_at", (long)now);
+  prefs.putLong("last_seen",  (long)now);
+  prefs.end();
+  return sid;
+}
+
+void touchLastSeen() {
+  prefs.begin("smoke", false);
+  prefs.putLong("last_seen", (long)time(nullptr));
+  prefs.end();
+}
+
+// ===== MQTT =====
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    Serial.print("Message arrived on topic: ");
-    Serial.println(topic);
-    Serial.print("Payload: ");
-    for (unsigned int i = 0; i < length; i++) {
-        Serial.print((char)payload[i]);
-    }
-    Serial.println();
+  // (Optional) handle inbound messages later
+  Serial.print("MQTT in ["); Serial.print(topic); Serial.print("] ");
+  for (unsigned int i = 0; i < length; i++) Serial.print((char)payload[i]);
+  Serial.println();
 }
 
-// Connect to AWS IoT Core
 void connectToAWS() {
-    int retryCount = 0;
-    while (!mqttClient.connected() && retryCount < 10) {
-        Serial.print("Connecting to AWS IoT...");
-        if (mqttClient.connect(AWS_IOT_CLIENT_ID)) {
-            Serial.println("Connected!");
-            mqttClient.subscribe(AWS_IOT_TOPIC);
-        } else {
-            Serial.print("Failed. State: ");
-            Serial.println(mqttClient.state());
-            delay(2000);
-            retryCount++;
-        }
-    }
-    if (!mqttClient.connected()) {
-        Serial.println("Failed to connect to AWS IoT. Restarting...");
-        ESP.restart();
-    }
-}
-
-
-void readThermocouple() {
-    unsigned long now = millis();
-
-    if (!waitingForConversion) {
-        if (now - lastSensorReadTime >= sensorReadInterval) {
-            // Switch MUX
-            digitalWrite(T0, currentSensor & 1);
-            digitalWrite(T1, currentSensor & 2);
-            digitalWrite(T2, currentSensor & 4);
-
-            muxSwitchTime = now;
-            waitingForConversion = true;
-        }
+  int retries = 0;
+  while (!mqttClient.connected() && retries < 10) {
+    Serial.print("Connecting to AWS IoT… ");
+    if (mqttClient.connect(AWS_IOT_CLIENT_ID)) {
+      Serial.println("OK");
+      mqttClient.subscribe(AWS_IOT_TOPIC);  // listen if you want to
     } else {
-        if (now - muxSwitchTime >= 100) {  // Wait 100ms after switching
-            double ftemp = thermocouple.readFahrenheit();
-
-            if (isnan(ftemp) || ftemp < -100 || ftemp > 1000) {
-                Temps[currentSensor] = -999;
-                Serial.println("Thermocouple reading invalid.");
-            } else {
-                Temps[currentSensor] = trunc(ftemp);
-            }
-
-             // Internal temp after last probe
-            if (currentSensor == NUM_SENSORS - 1) {
-                //double internalC = ((int16_t)((raw >> 4) & 0x0FFF)) * 0.0625;
-                double internalC = thermocouple.readInternal();
-                outsideTemp = trunc((internalC * 9.0 / 5.0) + 32);
-            }
-
-            currentSensor = (currentSensor + 1) % NUM_SENSORS;
-            lastSensorReadTime = now;
-            waitingForConversion = false;
-        }
+      Serial.print("Failed, rc="); Serial.println(mqttClient.state());
+      delay(1500);
+      retries++;
     }
+  }
+  if (!mqttClient.connected()) {
+    Serial.println("MQTT connect failed, restarting…");
+    ESP.restart();
+  }
 }
 
+// ===== Sensors =====
+void readThermocouple() {
+  unsigned long now = millis();
 
-// Read Humidity Data
+  if (!waitingForConversion) {
+    if (now - lastSensorReadTime >= sensorReadInterval) {
+      // Set MUX select bits cleanly
+      digitalWrite(T0, (currentSensor >> 0) & 1);
+      digitalWrite(T1, (currentSensor >> 1) & 1);
+      digitalWrite(T2, (currentSensor >> 2) & 1);
+
+      muxSwitchTime = now;
+      waitingForConversion = true;
+    }
+  } else {
+    if (now - muxSwitchTime >= 100) { // wait after switching
+      double ftemp = thermocouple.readFahrenheit();
+      if (isnan(ftemp) || ftemp < -100 || ftemp > 1000) {
+        Temps[currentSensor] = -999;
+      } else {
+        Temps[currentSensor] = trunc(ftemp);
+      }
+
+      // After last probe, read internal (chip) temp → outsideTemp
+      if (currentSensor == NUM_SENSORS - 1) {
+        double internalC = thermocouple.readInternal(); // Celsius
+        outsideTemp = trunc((internalC * 9.0 / 5.0) + 32.0);
+      }
+
+      currentSensor = (currentSensor + 1) % NUM_SENSORS;
+      lastSensorReadTime = now;
+      waitingForConversion = false;
+    }
+  }
+}
+
 void readHumidity() {
-    humidity = dht.readHumidity();
-    if (isnan(humidity)) {
-        humidity = 0.0;
-        //lcd.setCursor(0, 2);
-        //lcd.print("DHT Sensor Error");
-    }
+  humidity = dht.readHumidity();
+  if (isnan(humidity)) humidity = 0.0;
 }
 
-// Read Smoke Sensor Data
 void readSmokeSensor() {
-    smokePPM = analogRead(MQ135_PIN) * (5.0 / 1023.0) * 10.0;
-    if (isnan(smokePPM)) {
-        smokePPM = 0.0;
-        lcd.setCursor(0, 3);
-        lcd.print("Smoke Sensor Error");
-    }
+  // ESP32-C3 default adcWidth is 12-bit, but we set to 10-bit in setup.
+  // If you change resolution, adjust the divisor accordingly (1023 vs 4095).
+  int raw = analogRead(MQ135_PIN);
+  smokePPM = (raw * (5.0 / 1023.0)) * 10.0;  // placeholder scaling; calibrate MQ-135 later
+  if (isnan(smokePPM)) smokePPM = 0.0;
 }
 
-// Update LCD
-// Update LCD
+// ===== LCD =====
 void updateLCD() {
-    static int prevOutsideTemp = -999, prevTopTemp = -999, prevMidTemp = -999, prevBotTemp = -999;
-    static int prevProbe1 = -999, prevProbe2 = -999, prevProbe3 = -999;
+  static int prevOutside = -999, prevTop = -999, prevMid = -999, prevBot = -999;
+  static int prevP1 = -999, prevP2 = -999, prevP3 = -999;
 
-    // Updated helper function: prints dash if value == -999
-    auto printValue = [](int col, int row, String label, int value, int prevValue) {
-        if (value != prevValue) {
-            // Clear previous text first
-            String clearString = label + "    "; // label + 4 spaces to clear old numbers
-            lcd.setCursor(col, row);
-            lcd.print(clearString);
+  auto printValue = [](int col, int row, const String& label, int value, int prevValue) {
+    if (value != prevValue) {
+      String clearString = label + "    ";
+      lcd.setCursor(col, row); lcd.print(clearString);
+      lcd.setCursor(col, row);
+      if (value == -999) lcd.print(label + "-");
+      else               lcd.print(label + String(value) + "F");
+    }
+  };
 
-            // Then print updated value or dash
-            lcd.setCursor(col, row);
-            if (value == -999) {
-                lcd.print(label + "-");
-            } else {
-                lcd.print(label + String(value) + "F");
-            }
-        }
-    };
+  printValue(0, 0,  "Out:", (int)outsideTemp, prevOutside);
+  printValue(0, 1,  "Top:", (int)Temps[2],   prevTop);
+  printValue(0, 2,  "Mid:", (int)Temps[1],   prevMid);
+  printValue(0, 3,  "Bot:", (int)Temps[0],   prevBot);
+  printValue(11, 1, "P1:",  (int)Temps[4],   prevP1);
+  printValue(11, 2, "P2:",  (int)Temps[5],   prevP2);
+  printValue(11, 3, "P3:",  (int)Temps[6],   prevP3);
 
-    printValue(0, 0, "Out:", int(outsideTemp), prevOutsideTemp);
-    printValue(0, 1, "Top:", int(Temps[2]), prevTopTemp);
-    printValue(0, 2, "Mid:", int(Temps[1]), prevMidTemp);
-    printValue(0, 3, "Bot:", int(Temps[0]), prevBotTemp);
-    printValue(11, 1, "P1:", int(Temps[4]), prevProbe1);
-    printValue(11, 2, "P2:", int(Temps[5]), prevProbe2);
-    printValue(11, 3, "P3:", int(Temps[6]), prevProbe3);
-
-    // Update previous values
-    prevOutsideTemp = int(outsideTemp);
-    prevTopTemp = int(Temps[2]);
-    prevMidTemp = int(Temps[1]);
-    prevBotTemp = int(Temps[0]);
-    prevProbe1 = int(Temps[4]);
-    prevProbe2 = int(Temps[5]);
-    prevProbe3 = int(Temps[6]);
+  prevOutside = (int)outsideTemp;
+  prevTop     = (int)Temps[2];
+  prevMid     = (int)Temps[1];
+  prevBot     = (int)Temps[0];
+  prevP1      = (int)Temps[4];
+  prevP2      = (int)Temps[5];
+  prevP3      = (int)Temps[6];
 }
 
-
-// Publish Data to MQTT
+// ===== Publish =====
 void publishMQTT() {
-    if (millis() - lastMqttSendTime >= mqttSendInterval) {
-        StaticJsonDocument<512> doc;
-         String timestamp = generateTimestamp(); 
-        doc["session_id"] = session_id;
-        doc["timestamp"] = timestamp;
-        doc["outside_temp"] = outsideTemp;
-        doc["bottom_temp"] = int(Temps[0]);
-        doc["middle_temp"] = int(Temps[1]);
-        doc["top_temp"] = int(Temps[2]);
-        doc["probe1_temp"] = int(Temps[4]);
-        doc["probe2_temp"] = int(Temps[5]);
-        doc["probe3_temp"] = int(Temps[6]);
-        doc["humidity"] = humidity;
-        doc["smoke_ppm"] = smokePPM;
+  if (millis() - lastMqttSendTime < mqttSendInterval) return;
 
-        char buffer[512];
-        size_t jsonSize = serializeJson(doc, buffer);
-        if (jsonSize <= 512) {
-            mqttClient.publish(AWS_IOT_TOPIC, buffer);
-        } else {
-            Serial.println("Error: Payload size exceeds buffer!");
-        }
-        lastMqttSendTime = millis();
-    }
+  StaticJsonDocument<768> doc;  // generous headroom
+  String ts = generateTimestampUTC();
+  time_t now = time(nullptr);
+
+  doc["session_id"]   = session_id;
+  doc["timestamp"]    = ts;             // 20250914T180300Z
+  doc["ts_epoch"]     = (uint32_t)now;  // optional seconds since epoch
+  doc["device_id"]    = DEVICE_ID;      // MAC hex
+  doc["firmware"]     = FIRMWARE_VERSION;
+
+  doc["outside_temp"] = outsideTemp;
+  doc["bottom_temp"]  = (int)Temps[0];
+  doc["middle_temp"]  = (int)Temps[1];
+  doc["top_temp"]     = (int)Temps[2];
+  doc["probe1_temp"]  = (int)Temps[4];
+  doc["probe2_temp"]  = (int)Temps[5];
+  doc["probe3_temp"]  = (int)Temps[6];
+  doc["humidity"]     = humidity;
+  doc["smoke_ppm"]    = smokePPM;
+
+  char buffer[768];
+  size_t n = serializeJson(doc, buffer, sizeof(buffer));
+  if (n == 0 || n >= sizeof(buffer)) {
+    Serial.println("Payload too large");
+    return;
+  }
+
+  if (mqttClient.publish(AWS_IOT_TOPIC, buffer)) {
+    lastMqttSendTime = millis();
+    touchLastSeen();    // <- update NVS to keep session alive across reboots
+  } else {
+    Serial.println("MQTT publish failed");
+  }
 }
 
-// OTA Setup
+// ===== OTA =====
 void setupOTA() {
-    ArduinoOTA.onStart([]() {
-        lcd.setCursor(0, 3);
-        lcd.print("OTA Update");
-    });
-    ArduinoOTA.onEnd([]() {
-        lcd.setCursor(0, 3);
-        lcd.print("OTA Complete");
-    });
-    ArduinoOTA.onError([](ota_error_t error) {
-        lcd.setCursor(0, 3);
-        lcd.print("OTA Error: ");
-        lcd.print(error);
-    });
-    ArduinoOTA.begin();
+  ArduinoOTA.onStart([]() {
+    lcd.setCursor(0, 3); lcd.print("OTA Update       ");
+  });
+  ArduinoOTA.onEnd([]() {
+    lcd.setCursor(0, 3); lcd.print("OTA Complete     ");
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    lcd.setCursor(0, 3); lcd.print("OTA Error: "); lcd.print(error);
+  });
+  ArduinoOTA.begin();
 }
 
-// Setup
+// ===== Setup / Loop =====
 void setup() {
-    Serial.begin(115200);
-  //  while (!Serial) {
-   // delay(10);  // Wait for USB CDC serial to connect
-   // }
+  Serial.begin(115200);
 
-    Wire.begin(I2C_SDA, I2C_SCL);
-    pinMode(T0, OUTPUT);
-    pinMode(T1, OUTPUT);
-    pinMode(T2, OUTPUT);
+  Wire.begin(I2C_SDA, I2C_SCL);
+  pinMode(T0, OUTPUT); pinMode(T1, OUTPUT); pinMode(T2, OUTPUT);
 
-    setupLCD();
-    connectToWiFi();
-    syncTime();
+  setupLCD();
+  connectToWiFi();
+  syncTime();
 
-    wifiClient.setCACert(AWS_IOT_CA_CERT);
-    wifiClient.setCertificate(AWS_IOT_CLIENT_CERT);
-    wifiClient.setPrivateKey(AWS_IOT_PRIVATE_KEY);
+  wifiClient.setCACert(AWS_IOT_CA_CERT);
+  wifiClient.setCertificate(AWS_IOT_CLIENT_CERT);
+  wifiClient.setPrivateKey(AWS_IOT_PRIVATE_KEY);
 
-    mqttClient.setServer(AWS_IOT_ENDPOINT, AWS_IOT_PORT);
-    mqttClient.setCallback(mqttCallback);
+  mqttClient.setServer(AWS_IOT_ENDPOINT, AWS_IOT_PORT);
+  mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(768); // allow larger JSON publishes
 
-    session_id = generateSessionId();
-    dht.begin();
+  DEVICE_ID = macAsHex();
+  session_id = loadOrCreateSessionId(); // 30m gap reuse
 
-    connectToAWS();
-    setupOTA();
-    analogReadResolution(10);  // ensures range is 0–1023
+  dht.begin();
+  analogReadResolution(10);  // 0..1023 (keep consistent with smokePPM math)
+
+  connectToAWS();
+  setupOTA();
 }
 
-// Loop
 void loop() {
-    if (!mqttClient.connected()) {
-        connectToAWS();
-    }
-    mqttClient.loop();
-    ArduinoOTA.handle();
-    readThermocouple();
-    readHumidity();
-    readSmokeSensor();
-    publishMQTT();
-    updateLCD();
+  if (!mqttClient.connected()) {
+    connectToAWS();
+  }
+  mqttClient.loop();
+  ArduinoOTA.handle();
+
+  readThermocouple();
+  readHumidity();
+  readSmokeSensor();
+
+  publishMQTT();
+  updateLCD();
 }
