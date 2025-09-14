@@ -8,19 +8,20 @@ import ProbeChart from "./components/ProbeCard/ProbeChart";
 import { fetchLatestSession, fetchSensors, fetchItemTypes } from "./api";
 import axios from "axios";
 
-const POLL_MS = 15000; // 15s
+const POLL_MS = 15000; // 15s UI refresh
+
 // Full URL to your API route that saves probe assignments
 const PROBE_ASSIGNMENT_URL =
   "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
 export default function App() {
-  // Data
+  // ---- Data ----
   const [sessionId, setSessionId] = useState("");
   const [sensorData, setSensorData] = useState([]);
   const [itemTypes, setItemTypes] = useState([]); // formerly “meat types”
   const [alerts, setAlerts] = useState([]);
 
-  // UI state
+  // ---- UI state ----
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const timerRef = useRef(null);
@@ -102,7 +103,7 @@ export default function App() {
       setSessionId(sid);
 
       const data = await fetchSensors(sid, 100);
-      // Sort newest-first by timestamp (string compare OK for your format)
+      // Sort newest-first by timestamp (ISO-ish string compare is OK for your format)
       const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) => {
         const ta = String(a?.timestamp ?? "");
         const tb = String(b?.timestamp ?? "");
@@ -160,17 +161,19 @@ export default function App() {
     setAlerts((prev) => prev.filter((a) => a.probeId !== probeId));
   }, []);
 
-  const handleSetAlert = useCallback((id, min, max, mobileNumber) => {
-    setAlerts((prev) => [
-      ...prev,
-      { probeId: id, min, max, probeName: nameForProbe(id), active: true, mobileNumber },
-    ]);
-  }, [probes]); // probes reference used in nameForProbe
+  const handleSetAlert = useCallback(
+    (id, min, max, mobileNumber) => {
+      // Snapshot the current name for the probe for display
+      const current = probes.find((p) => p.id === id);
+      const probeName = current?.name || id;
 
-  function nameForProbe(id) {
-    const p = probes.find((x) => x.id === id);
-    return p?.name || id;
-  }
+      setAlerts((prev) => [
+        ...prev,
+        { probeId: id, min, max, probeName, active: true, mobileNumber },
+      ]);
+    },
+    [probes]
+  );
 
   // Assign / update item on a probe (parent owns persistence)
   const handleItemChange = useCallback(
@@ -188,7 +191,7 @@ export default function App() {
           sessionId, // current session
         });
       } catch (e) {
-        // non-fatal; shows in console for debugging
+        // Non-fatal; log for debugging
         // eslint-disable-next-line no-console
         console.error("Error saving probe assignment:", e?.message || e);
       }
@@ -251,10 +254,8 @@ export default function App() {
                 onClearAlert={onClearAlert}
                 onMeatChange={(id, t, w) => handleItemChange(id, t, w)}
                 meatTypes={itemTypes || []}
-                // NOTE: we are not passing apiEndpoint here on purpose;
-                // App.js persists assignments itself to PROBE_ASSIGNMENT_URL.
-                // When your AI Advisor endpoint is ready, we’ll pass its base
-                // as a separate prop and call it from ProbeCard.
+                // App persists assignments itself to PROBE_ASSIGNMENT_URL;
+                // ProbeCard just calls onMeatChange.
                 sessionId={sessionId}
               />
               <div className="probe-chart-container" style={{ flex: 1 }}>
