@@ -1,0 +1,16 @@
+name: Guard main PRs
+on:
+  pull_request:
+    branches: [ main ]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow only release PRs to main
+        run: |
+          title="${{ github.event.pull_request.title }}"
+          base="${{ github.event.pull_request.base.ref }}"
+          if [ "$base" = "main" ] && ! echo "$title" | grep -qiE 'release|hotfix'; then
+            echo "PRs to main must be releases or hotfixes."
+            exit 1
+          fi
