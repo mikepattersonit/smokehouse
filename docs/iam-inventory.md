@@ -1,6 +1,6 @@
 # IAM Inventory (read-only summary)
 
-_Generated from local files in `cloud-inventory/iam` on 2025-09-01T22:18:06Z. Raw JSON is **not** committed._
+_Generated from local files in `cloud-inventory/iam` on 2025-09-01T23:28:43Z. Raw JSON is **not** committed._
 
 ## Lambda → Role mapping
 
@@ -65,8 +65,7 @@ _Generated from local files in `cloud-inventory/iam` on 2025-09-01T22:18:06Z. Ra
 - ARN: `arn:aws:iam::623626440685:role/service-role/fetchSensorData-role-oc1xfb1o`
 - Attached managed policies:
   - AWSLambdaBasicExecutionRole-d6a6c010-37f0-4456-9fab-af1743290a89 (arn:aws:iam::623626440685:policy/service-role/AWSLambdaBasicExecutionRole-d6a6c010-37f0-4456-9fab-af1743290a89)
-  - AWSLambdaInvocation-DynamoDB (arn:aws:iam::aws:policy/AWSLambdaInvocation-DynamoDB)
-  - AmazonDynamoDBReadOnlyAccess (arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess)
+  - Smokehouse-fetchSensorData-Read (arn:aws:iam::623626440685:policy/Smokehouse-fetchSensorData-Read)
 - Inline policies:
   - Smokehouse_api_read
 
@@ -74,9 +73,8 @@ _Generated from local files in `cloud-inventory/iam` on 2025-09-01T22:18:06Z. Ra
 
 - ARN: `arn:aws:iam::623626440685:role/service-role/lambda_meat_data-role-bmc67t41`
 - Attached managed policies:
+  - Smokehouse-lambda_meat_data-Read (arn:aws:iam::623626440685:policy/Smokehouse-lambda_meat_data-Read)
   - AWSLambdaBasicExecutionRole-5d852533-1296-4b47-84ca-7bf0a10a589d (arn:aws:iam::623626440685:policy/service-role/AWSLambdaBasicExecutionRole-5d852533-1296-4b47-84ca-7bf0a10a589d)
-  - AWSLambdaInvocation-DynamoDB (arn:aws:iam::aws:policy/AWSLambdaInvocation-DynamoDB)
-  - AmazonDynamoDBReadOnlyAccess (arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess)
 - Inline policies: _none_
 
 ## IoT

@@ -5,11 +5,29 @@ import json
 from decimal import Decimal
 from boto3.dynamodb.conditions import Key
 
+SSM_PARAM_NAME = os.environ.get("OPENAI_API_KEY_PARAM", "/smokehouse/openai/api_key")
+_ssm = boto3.client("ssm")
+
+def _get_openai_key():
+    resp = _ssm.get_parameter(Name=SSM_PARAM_NAME, WithDecryption=True)
+    return resp["Parameter"]["Value"]
+
+
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
 
 # Initialize OpenAI API
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+SSM_PARAM_NAME = os.environ.get("OPENAI_API_KEY_PARAM", "/smokehouse/openai/api_key")
+_ssm = boto3.client("ssm")
+
+def _get_openai_key():
+    resp = _ssm.get_parameter(Name=SSM_PARAM_NAME, WithDecryption=True)
+    return resp["Parameter"]["Value"]
+
+#openai.api_key = _get_openai_key()
+openai.api_key = _get_openai_key()
+
 
 # Environment variables for table names
 PROBE_ASSIGNMENT_TABLE = os.getenv('PROBE_ASSIGNMENT_TABLE', 'ProbeAssignments')
