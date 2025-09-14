@@ -1,15 +1,27 @@
-const SENSORS_BASE = process.env.REACT_APP_SENSORS_BASE_URL;
-const DEFAULT_SESSION_ID = process.env.REACT_APP_DEFAULT_SESSION_ID || "";
+cat > src/api.js <<'JS'
+import axios from "axios";
 
-export async function fetchSensors(sessionId = DEFAULT_SESSION_ID, limit = 50) {
-  if (!SENSORS_BASE) throw new Error("REACT_APP_SENSORS_BASE_URL is not set");
-  const sid = (sessionId || "").toString().trim();
-  if (!sid) throw new Error("session_id is empty");
-  const url = `${SENSORS_BASE}/sensors?session_id=${encodeURIComponent(sid)}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`GET ${url} -> ${res.status}: ${text}`);
+const API_BASE =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE) ||
+  process.env.REACT_APP_API_BASE ||
+  "https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com";
+
+export const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 10000,
+});
+
+export async function getLatestSession() {
+  const res = await api.get("/sessions/latest");
+  // Handle both Lambda proxy {statusCode, body} and plain JSON
+  if (res.data && res.data.body && res.data.statusCode === 200) {
+    return JSON.parse(res.data.body);
   }
-  return res.json();
+  return res.data;
 }
+
+export async function getSensors(sessionId, limit = 100) {
+  const res = await api.get("/sensors", { params: { session_id: sessionId, limit } });
+  return Array.isArray(res.data) ? res.data : [];
+}
+JS
