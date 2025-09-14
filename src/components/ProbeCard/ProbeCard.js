@@ -1,177 +1,271 @@
-// ProbeCard.js (Updated with Use AI functionality and API interaction for assignments)
-import React, { useState, useEffect } from 'react';
-import './ProbeCard.css';
-import axios from 'axios';
+// src/components/ProbeCard/ProbeCard.js
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import axios from "axios";
+import "./ProbeCard.css";
 
-function ProbeCard({ probe, onSetAlert, onClearAlert, onMeatChange, meatTypes, apiEndpoint, sessionId }) {
-  const [minAlert, setMinAlert] = useState(probe.minAlert);
-  const [maxAlert, setMaxAlert] = useState(probe.maxAlert);
-  const [meatWeight, setMeatWeight] = useState(probe.meatWeight);
-  const [mobileNumber, setMobileNumber] = useState(probe.mobileNumber);
-  const [meatType, setMeatType] = useState(probe.meatType);
+/**
+ * Props:
+ *  - probe: { id, name, minAlert, maxAlert, mobileNumber, meatType, meatWeight, temperature }
+ *  - onSetAlert(id, min, max, mobileNumber)
+ *  - onClearAlert?(id)
+ *  - onMeatChange(id, meatType, meatWeight)
+ *  - meatTypes: [{ name, description? }, ...]  // from your API
+ *  - apiEndpoint: string                        // base API (e.g., https://.../ManageProbeAssignments parent-compatible)
+ *  - sessionId: string
+ */
+function ProbeCard({
+  probe,
+  onSetAlert,
+  onClearAlert,
+  onMeatChange,
+  meatTypes = [],
+  apiEndpoint = "",
+  sessionId = "",
+}) {
+  // Local editable state mirrors the probe prop
+  const [minAlert, setMinAlert] = useState(probe?.minAlert ?? "");
+  const [maxAlert, setMaxAlert] = useState(probe?.maxAlert ?? "");
+  const [meatWeight, setMeatWeight] = useState(probe?.meatWeight ?? "");
+  const [mobileNumber, setMobileNumber] = useState(probe?.mobileNumber ?? "");
+  const [meatType, setMeatType] = useState(probe?.meatType ?? "");
+  const [saving, setSaving] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
 
+  // Keep local state in sync when parent probe changes
   useEffect(() => {
-    // Sync probe state with parent state if it changes
-    setMinAlert(probe.minAlert);
-    setMaxAlert(probe.maxAlert);
-    setMeatWeight(probe.meatWeight);
-    setMeatType(probe.meatType);
-    setMobileNumber(probe.mobileNumber);
+    setMinAlert(probe?.minAlert ?? "");
+    setMaxAlert(probe?.maxAlert ?? "");
+    setMeatWeight(probe?.meatWeight ?? "");
+    setMeatType(probe?.meatType ?? "");
+    setMobileNumber(probe?.mobileNumber ?? "");
   }, [probe]);
 
-  const handleSetAlertClick = () => {
-    const number = prompt('Enter your mobile number for alerts:', mobileNumber || '');
-    if (number) {
-      setMobileNumber(number);
-      onSetAlert(probe.id, minAlert, maxAlert, number);
-      updateProbeAssignment(probe.id, meatType, meatWeight, minAlert, maxAlert, number);
-    }
-  };
+  const disabled = useMemo(() => !sessionId || !probe?.id, [sessionId, probe]);
 
-  const handleClearAlertClick = () => {
-    setMinAlert('');
-    setMaxAlert('');
-    setMobileNumber('');
-    onClearAlert(probe.id);
-    updateProbeAssignment(probe.id, meatType, meatWeight, null, null, null);
-  };
+  const formatUsPhone = useCallback((raw) => {
+    if (!raw) return "";
+    const digits = raw.replace(/\D/g, "");
+    // Accept 10-digit or 11-digit starting with 1
+    if (digits.length === 10) return `+1${digits}`;
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return ""; // invalid → caller can handle
+  }, []);
 
-  const handleMeatChange = (event) => {
-    const value = event.target.value;
-    setMeatType(value);
-    onMeatChange(probe.id, value, meatWeight);
-    updateProbeAssignment(probe.id, value, meatWeight, minAlert, maxAlert, mobileNumber);
-  };
-
-  const handleMeatWeightChange = (event) => {
-    const value = event.target.value;
-    setMeatWeight(value);
-    onMeatChange(probe.id, meatType, value);
-    updateProbeAssignment(probe.id, meatType, value, minAlert, maxAlert, mobileNumber);
-  };
-
-  const handleUseAI = async () => {
-    try {
-      const response = await fetch(`${apiEndpoint}/smokehouse-ai-advisor`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
+  const updateProbeAssignment = useCallback(
+    async (fields) => {
+      if (!apiEndpoint || !sessionId || !probe?.id) return;
+      setSaving(true);
+      setErrMsg("");
+      try {
+        // POST to your backend (kept path identical to your current usage)
+        await axios.post(`${apiEndpoint}/updateAssignment`, {
           session_id: sessionId,
-          probe_id: probe.id
-        })
-      });
-      if (!response.ok) {
-        throw new Error('Error fetching AI guidance');
+          probe_id: probe.id,
+          meat_type: fields.meatType,
+          weight: fields.meatWeight,
+          min_alert: fields.minAlert,
+          max_alert: fields.maxAlert,
+          mobile_number: fields.mobileNumber,
+        });
+      } catch (err) {
+        console.error("Error updating probe assignment:", err);
+        setErrMsg("Failed to save. Check network/API.");
+      } finally {
+        setSaving(false);
       }
-      const data = await response.json();
-      alert(`AI Guidance: ${data.advice}`);
-    } catch (error) {
-      console.error('Error using AI:', error);
-      alert('Unable to get AI guidance at the moment.');
-    }
-  };
+    },
+    [apiEndpoint, sessionId, probe?.id]
+  );
 
-  const updateProbeAssignment = async (probeId, meatType, weight, minAlert, maxAlert, mobileNumber) => {
+  // Handlers
+  const handleSetAlertClick = useCallback(() => {
+    const normalized = formatUsPhone(mobileNumber);
+    if (!normalized) {
+      setErrMsg("Enter a valid US mobile number (10 digits).");
+      return;
+    }
+    setErrMsg("");
+    onSetAlert?.(probe.id, minAlert === "" ? null : Number(minAlert), maxAlert === "" ? null : Number(maxAlert), normalized);
+    updateProbeAssignment({
+      meatType,
+      meatWeight,
+      minAlert: minAlert === "" ? null : Number(minAlert),
+      maxAlert: maxAlert === "" ? null : Number(maxAlert),
+      mobileNumber: normalized,
+    });
+  }, [formatUsPhone, mobileNumber, onSetAlert, probe?.id, minAlert, maxAlert, meatType, meatWeight, updateProbeAssignment]);
+
+  const handleClearAlertClick = useCallback(() => {
+    setMinAlert("");
+    setMaxAlert("");
+    setMobileNumber("");
+    onClearAlert?.(probe.id);
+    updateProbeAssignment({
+      meatType,
+      meatWeight,
+      minAlert: null,
+      maxAlert: null,
+      mobileNumber: null,
+    });
+  }, [onClearAlert, probe?.id, meatType, meatWeight, updateProbeAssignment]);
+
+  const handleMeatTypeChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      setMeatType(value);
+      onMeatChange?.(probe.id, value, meatWeight);
+      updateProbeAssignment({
+        meatType: value,
+        meatWeight,
+        minAlert: minAlert === "" ? null : Number(minAlert),
+        maxAlert: maxAlert === "" ? null : Number(maxAlert),
+        mobileNumber: mobileNumber || null,
+      });
+    },
+    [probe?.id, meatWeight, onMeatChange, updateProbeAssignment, minAlert, maxAlert, mobileNumber]
+  );
+
+  const handleMeatWeightChange = useCallback(
+    (e) => {
+      const value = e.target.value;
+      setMeatWeight(value);
+      onMeatChange?.(probe.id, meatType, value);
+      updateProbeAssignment({
+        meatType,
+        meatWeight: value,
+        minAlert: minAlert === "" ? null : Number(minAlert),
+        maxAlert: maxAlert === "" ? null : Number(maxAlert),
+        mobileNumber: mobileNumber || null,
+      });
+    },
+    [probe?.id, meatType, onMeatChange, updateProbeAssignment, minAlert, maxAlert, mobileNumber]
+  );
+
+  const handleUseAI = useCallback(async () => {
+    if (!apiEndpoint || !sessionId) return;
+    setSaving(true);
+    setErrMsg("");
     try {
-      const response = await axios.post(`${apiEndpoint}/updateAssignment`, {
-        session_id: sessionId,
-        probe_id: probeId,
-        meat_type: meatType,
-        weight: weight,
-        min_alert: minAlert,
-        max_alert: maxAlert,
-        mobile_number: mobileNumber
+      const resp = await fetch(`${apiEndpoint}/smokehouse-ai-advisor`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, probe_id: probe.id }),
       });
-
-      if (response.status === 200) {
-        console.log('Probe assignment updated successfully in the database');
-      } else {
-        console.error('Failed to update probe assignment in the database');
-      }
-    } catch (error) {
-      console.error('Error updating probe assignment:', error);
+      if (!resp.ok) throw new Error("Advisor request failed");
+      const data = await resp.json();
+      // Keep UX simple for now
+      window.alert(`AI Guidance: ${data.advice}`);
+    } catch (err) {
+      console.error("AI guidance error:", err);
+      setErrMsg("AI guidance unavailable right now.");
+    } finally {
+      setSaving(false);
     }
-  };
+  }, [apiEndpoint, sessionId, probe?.id]);
 
   return (
-    <div className="probe-card" style={{ marginLeft: '20px' }}> {/* Added left margin here */}
-      <h3>{probe.name}</h3>
-      <p>Temperature: {probe.temperature !== null ? `${probe.temperature} °F` : 'N/A'}</p>
-      <div className="input-group">
-        <label>Min Alert:</label>
-        <input 
-          type="number" 
-          value={minAlert} 
-          onChange={(e) => setMinAlert(e.target.value)} 
-          min={0} 
-          max={300} 
-          style={{
-            width: '80px', // Adjusted width here
-            padding: '5px',
-            marginRight: '10px',
-          }}
-        />
+    <div className="probe-card" style={{ marginLeft: 20, opacity: disabled ? 0.6 : 1 }}>
+      <div className="probe-card__header">
+        <h3 style={{ margin: 0 }}>{probe?.name ?? "Probe"}</h3>
+        <div style={{ fontSize: 12, color: "#666" }}>{probe?.id}</div>
       </div>
 
-      <div className="input-group">
-        <label>Max Alert:</label>
-        <input 
-          type="number" 
-          value={maxAlert} 
-          onChange={(e) => setMaxAlert(e.target.value)} 
-          min={0} 
-          max={300} 
-          style={{
-            width: '80px', // Adjusted width here
-            padding: '5px',
-            marginRight: '10px',
-          }}
-        />
-      </div>
+      <p style={{ marginTop: 6, marginBottom: 14 }}>
+        Temperature:&nbsp;
+        <strong>{probe?.temperature != null ? `${probe.temperature} °F` : "N/A"}</strong>
+      </p>
 
-      {minAlert || maxAlert ? (
-        <button onClick={handleClearAlertClick}>Clear Alert</button>
-      ) : (
-        <button onClick={handleSetAlertClick}>Set Alert</button> 
-      )}
-
-      <button onClick={handleUseAI}>AI Guidance</button>
-
-      <div className="input-group">
-        <label>Meat Type:</label>
-        <select 
-          value={meatType} 
-          onChange={handleMeatChange} 
-          style={{
-            marginLeft: '20px', // Added left margin for better alignment
-            width: '80px', // Adjusted width here
-            padding: '5px',
-            marginRight: '10px',
-          }}
+      {/* Item (formerly Meat) Assignment */}
+      <div className="input-group" style={{ marginBottom: 10 }}>
+        <label>Item Type:&nbsp;</label>
+        <select
+          value={meatType}
+          onChange={handleMeatTypeChange}
+          disabled={disabled || saving}
+          style={{ marginLeft: 6, width: 160, padding: 6 }}
         >
-          <option value="">Select Meat</option>
-          {meatTypes.map((meat) => (
-            <option key={meat.id} value={meat.name}>{meat.name}</option>
+          <option value="">Select Item</option>
+          {meatTypes.map((t) => (
+            <option key={t.name || t.id} value={t.name || t.id}>
+              {(t.name || t.id || "").toString()}
+            </option>
           ))}
         </select>
       </div>
 
-      <div className="input-group">
-        <label>Weight (lbs):</label>
-        <input 
-          type="number" 
-          value={meatWeight} 
-          onChange={handleMeatWeightChange} 
-          placeholder="Enter weight in lbs" 
-          style={{
-            marginLeft: '10px', // Added left margin for better alignment
-            width: '80px', // Adjusted width here
-            padding: '5px',
-          }}
+      <div className="input-group" style={{ marginBottom: 12 }}>
+        <label>Weight (lbs):&nbsp;</label>
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          value={meatWeight}
+          onChange={handleMeatWeightChange}
+          disabled={disabled || saving}
+          placeholder="e.g. 4.5"
+          style={{ width: 100, padding: 6 }}
         />
       </div>
+
+      {/* Alerts */}
+      <div className="input-group" style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <div>
+          <label>Min Alert:&nbsp;</label>
+          <input
+            type="number"
+            min="0"
+            max="300"
+            value={minAlert}
+            onChange={(e) => setMinAlert(e.target.value)}
+            disabled={disabled || saving}
+            style={{ width: 90, padding: 6 }}
+          />
+        </div>
+        <div>
+          <label>Max Alert:&nbsp;</label>
+          <input
+            type="number"
+            min="0"
+            max="300"
+            value={maxAlert}
+            onChange={(e) => setMaxAlert(e.target.value)}
+            disabled={disabled || saving}
+            style={{ width: 90, padding: 6 }}
+          />
+        </div>
+        <div>
+          <label>Mobile:&nbsp;</label>
+          <input
+            type="tel"
+            value={mobileNumber}
+            onChange={(e) => setMobileNumber(e.target.value)}
+            disabled={disabled || saving}
+            placeholder="(555) 123-4567"
+            style={{ width: 160, padding: 6 }}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {minAlert || maxAlert ? (
+          <button onClick={handleClearAlertClick} disabled={disabled || saving}>
+            Clear Alerts
+          </button>
+        ) : (
+          <button onClick={handleSetAlertClick} disabled={disabled || saving}>
+            Save Alerts
+          </button>
+        )}
+        <button onClick={handleUseAI} disabled={disabled || saving}>
+          Use AI Guidance
+        </button>
+      </div>
+
+      {errMsg && (
+        <div style={{ marginTop: 10, color: "#b91c1c", fontSize: 13 }}>
+          {errMsg}
+        </div>
+      )}
     </div>
   );
 }
