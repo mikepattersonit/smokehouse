@@ -1,0 +1,24 @@
+version: 1
+applications:
+  - appRoot: .
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - nvm use 18 || nvm install 18
+            # If npm ci fails due to a lock mismatch, fall back to npm install
+            - if ! npm ci --no-audit --no-fund; then
+                echo "npm ci failed, falling back to npm install" ;
+                rm -rf node_modules ;
+                npm install --no-audit --no-fund ;
+              fi
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: build
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
