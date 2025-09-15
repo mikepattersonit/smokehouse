@@ -1,0 +1,14 @@
+{
+  "Version":"2012-10-17",
+  "Statement":[
+    {
+      "Sid":"QuerySensorDataBySessionTimestamp",
+      "Effect":"Allow",
+      "Action":["dynamodb:Query"],
+      "Resource":[
+        "arn:aws:dynamodb:us-east-2:623626440685:table/sensor_data/index/by_session_timestamp",
+        "arn:aws:dynamodb:us-east-2:623626440685:table/sensor_data"
+      ]
+    }
+  ]
+}
