@@ -46,3 +46,8 @@ cloud-inventory/iam/
 # IAM inventory (local only)
 cloud-inventory/iam/
 cloud-inventory/ddb/
+.artifacts/
+.env.*.local
+lambdas/**/__pycache__/
+firmware/**/credentials.h
+firmware/**/secrets*.h
