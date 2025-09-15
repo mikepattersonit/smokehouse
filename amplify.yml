@@ -1,0 +1,21 @@
+version: 1
+applications:
+  - appRoot: .
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            # Pin Node (Amplify uses nvm under the hood)
+            - nvm use 18 || nvm install 18
+            # Clean, deterministic installs
+            - npm ci --no-audit --no-fund
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: build
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
