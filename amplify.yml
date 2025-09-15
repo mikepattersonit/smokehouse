@@ -6,8 +6,12 @@ applications:
         preBuild:
           commands:
             - nvm use 18 || nvm install 18
-            # Prefer hermetic installs; fall back if the lock ever drifts
-            - npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+            # If npm ci fails due to a lock mismatch, fall back to npm install
+            - if ! npm ci --no-audit --no-fund; then
+                echo "npm ci failed, falling back to npm install" ;
+                rm -rf node_modules ;
+                npm install --no-audit --no-fund ;
+              fi
         build:
           commands:
             - npm run build
