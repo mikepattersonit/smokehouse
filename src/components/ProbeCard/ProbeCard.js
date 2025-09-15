@@ -1,7 +1,7 @@
 // src/components/ProbeCard/ProbeCard.js
 import React, { useEffect, useState, useCallback } from "react";
 import "./ProbeCard.css";
-import axios from "axios";
+import { postAdvisor } from "../../api";
 
 function ProbeCard({
   probe,
@@ -9,81 +9,65 @@ function ProbeCard({
   onClearAlert,
   onMeatChange,
   meatTypes = [],
-  apiEndpoint,
   sessionId,
 }) {
-  // Local, form-controlled state
+  // Local, form-controlled state (start from probe values)
   const [minAlert, setMinAlert] = useState(probe.minAlert ?? "");
   const [maxAlert, setMaxAlert] = useState(probe.maxAlert ?? "");
   const [mobileNumber, setMobileNumber] = useState(probe.mobileNumber ?? "");
-  const [meatType, setMeatType] = useState(probe.meatType ?? "");
-  const [meatWeight, setMeatWeight] = useState(probe.meatWeight ?? "");
+  const [itemType, setItemType] = useState(probe.itemType ?? "");
+  const [itemWeight, setItemWeight] = useState(probe.itemWeight ?? "");
+  const [advisorBusy, setAdvisorBusy] = useState(false);
 
-  // Only resync when the *probe identity* changes (avoid overwriting while typing)
+  // Only re-sync when the *probe itself* changes to avoid clobbering user typing
   useEffect(() => {
     setMinAlert(probe.minAlert ?? "");
     setMaxAlert(probe.maxAlert ?? "");
     setMobileNumber(probe.mobileNumber ?? "");
-    setMeatType(probe.meatType ?? "");
-    setMeatWeight(probe.meatWeight ?? "");
-  }, [probe.id]); // <— key change
+    setItemType(probe.itemType ?? "");
+    setItemWeight(probe.itemWeight ?? "");
+  }, [probe.id]); // important: don't depend on individual values
 
-  const persistAssignment = useCallback(
-    async (payload) => {
-      if (!apiEndpoint || !sessionId) return;
-      try {
-        await axios.post(`${apiEndpoint}/updateAssignment`, payload);
-        // optional toast/log here
-      } catch (err) {
-        console.error("Error updating probe assignment:", err);
-      }
-    },
-    [apiEndpoint, sessionId]
-  );
-
-  // Save item-type / weight on blur or Save button
+  // Inform parent so it can persist (parent/App owns network calls)
   const saveItemDetails = useCallback(() => {
-    onMeatChange?.(probe.id, meatType, meatWeight);
-    persistAssignment({
-      session_id: sessionId,
-      probe_id: probe.id,
-      meat_type: meatType,
-      weight: meatWeight,
-      min_alert: minAlert || null,
-      max_alert: maxAlert || null,
-      mobile_number: mobileNumber || null,
-    });
-  }, [probe.id, meatType, meatWeight, minAlert, maxAlert, mobileNumber, onMeatChange, persistAssignment, sessionId]);
+    onMeatChange?.(probe.id, itemType, itemWeight);
+  }, [onMeatChange, probe.id, itemType, itemWeight]);
 
-  // Alerts
   const saveAlerts = useCallback(() => {
     onSetAlert?.(probe.id, minAlert, maxAlert, mobileNumber);
-    persistAssignment({
-      session_id: sessionId,
-      probe_id: probe.id,
-      meat_type: meatType,
-      weight: meatWeight,
-      min_alert: minAlert || null,
-      max_alert: maxAlert || null,
-      mobile_number: mobileNumber || null,
-    });
-  }, [probe.id, minAlert, maxAlert, mobileNumber, meatType, meatWeight, onSetAlert, persistAssignment, sessionId]);
+  }, [onSetAlert, probe.id, minAlert, maxAlert, mobileNumber]);
 
   const clearAlerts = useCallback(() => {
     setMinAlert("");
     setMaxAlert("");
     setMobileNumber("");
     onClearAlert?.(probe.id);
-    persistAssignment({
-      session_id: sessionId,
-      probe_id: probe.id,
-      meat_type: meatType,
-      weight: meatWeight,
-      min_alert: null,
-      max_alert: null,
-      mobile_number: null,
-    });
-  }, [probe.id, onClearAlert, persistAssignment, sessionId, meatType, meatWeight]);
+  }, [onClearAlert, probe.id]);
+
+  const handleAdvisor = useCallback(async () => {
+    if (!sessionId) {
+      alert("No active session yet.");
+      return;
+    }
+    setAdvisorBusy(true);
+    try {
+      const res = await postAdvisor({
+        session_id: sessionId,
+        probe_id: probe.id,
+      });
+      if (!res || res.error) {
+        throw new Error(res?.error || "Advisor returned an error");
+      }
+      const model = res.model ? ` (${res.model})` : "";
+      alert(`AI Guidance${model}:\n\n${res.advice ?? "No advice returned."}`);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Advisor error:", err);
+      alert("Unable to get AI guidance right now.");
+    } finally {
+      setAdvisorBusy(false);
+    }
+  }, [sessionId, probe.id]);
 
   return (
     <div className="probe-card" style={{ marginLeft: "20px" }}>
@@ -99,10 +83,10 @@ function ProbeCard({
       <div className="input-group">
         <label>Item Type:</label>
         <select
-          value={meatType}
-          onChange={(e) => setMeatType(e.target.value)}
+          value={itemType}
+          onChange={(e) => setItemType(e.target.value)}
           onBlur={saveItemDetails}
-          style={{ marginLeft: "12px", width: 180, padding: 5, marginRight: 10 }}
+          style={{ marginLeft: 12, width: 180, padding: 5, marginRight: 10 }}
         >
           <option value="">Select Item</option>
           {meatTypes.map((it) => (
@@ -121,11 +105,11 @@ function ProbeCard({
           inputMode="decimal"
           step="0.1"
           min="0"
-          value={meatWeight}
-          onChange={(e) => setMeatWeight(e.target.value)}
+          value={itemWeight}
+          onChange={(e) => setItemWeight(e.target.value)}
           onBlur={saveItemDetails}
           placeholder="e.g. 4.5"
-          style={{ marginLeft: "10px", width: 100, padding: 5 }}
+          style={{ marginLeft: 10, width: 100, padding: 5 }}
         />
       </div>
 
@@ -167,31 +151,13 @@ function ProbeCard({
         />
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
         <button onClick={saveAlerts}>Save Alerts</button>
         {(minAlert || maxAlert || mobileNumber) && (
           <button onClick={clearAlerts}>Clear Alerts</button>
         )}
-      </div>
-
-      <div style={{ marginTop: 8 }}>
-        <button
-          onClick={async () => {
-            try {
-              const resp = await fetch(`${apiEndpoint}/smokehouse-ai-advisor`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ session_id: sessionId, probe_id: probe.id }),
-              });
-              const json = await resp.json();
-              alert(`AI Guidance: ${json.advice ?? "No advice returned."}`);
-            } catch (e) {
-              console.error(e);
-              alert("Unable to get AI guidance right now.");
-            }
-          }}
-        >
-          Use AI Guidance
+        <button onClick={handleAdvisor} disabled={advisorBusy}>
+          {advisorBusy ? "Getting AI…" : "Use AI Guidance"}
         </button>
       </div>
     </div>
