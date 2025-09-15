@@ -1,99 +1,99 @@
 // src/api.js
 
-// Main API (sessions, sensors, advisor)
-const API_BASE =
+// ---------- Base URLs ----------
+export const API_BASE =
   process.env.REACT_APP_API_BASE ||
-  "https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com";
+  "https://w6hf0kxlve.execute-api.us-east-2.amazonaws.com"; // sessions/sensors/advisor
 
-// Item types API (was /meatTypes; we also try /itemTypes)
-const MEAT_API =
+const ITEMS_BASE =
   process.env.REACT_APP_MEAT_API_BASE ||
-  "https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com";
+  "https://o05rs5z8e1.execute-api.us-east-2.amazonaws.com"; // itemTypes/meatTypes
 
-// Probe assignment API (POST)
-const PROBE_API_BASE =
-  process.env.REACT_APP_PROBE_API_BASE ||
-  "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com";
+// Full URL for assignments (POST). Prefer a single URL to avoid double-slash mishaps.
+const ASSIGN_URL =
+  process.env.REACT_APP_ASSIGN_URL ||
+  "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
-/* ----------------------------- utils ----------------------------- */
-async function fetchJson(url, opts = {}, label = "request") {
-  const res = await fetch(url, opts);
+// ---------- Helper ----------
+async function jsonFetch(url, options = {}) {
+  const res = await fetch(url, options);
   let data = null;
   try {
     data = await res.json();
   } catch {
-    // ignore JSON parse errors; handled below
+    // non-JSON or empty body; leave data as null
   }
   if (!res.ok) {
-    const msg =
-      (data && (data.error || data.message)) ||
-      `${label} ${res.status} ${res.statusText}`;
-    throw new Error(msg);
+    const msg = data?.error || data?.message || `HTTP ${res.status} ${res.statusText}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
   return data;
 }
 
-/* ----------------------------- sessions ----------------------------- */
+// ---------- Sessions ----------
 /** GET /sessions/latest -> { session_id, started_at, status, ... } */
 export async function fetchLatestSession() {
-  const url = `${API_BASE}/sessions/latest`;
-  return fetchJson(url, undefined, "sessions/latest");
+  return jsonFetch(`${API_BASE}/sessions/latest`);
 }
 
-/* ------------------------------ sensors ------------------------------ */
-/** GET /sensors?session_id=...&limit=... -> [ { timestamp, ... }, ... ] */
+// ---------- Sensors ----------
+/** GET /sensors?session_id=...&limit=... -> array of samples (newest-first expected by UI) */
 export async function fetchSensors(sessionId, limit = 50) {
   if (!sessionId) throw new Error("fetchSensors: sessionId required");
-  const url = `${API_BASE}/sensors?session_id=${encodeURIComponent(
-    sessionId
-  )}&limit=${limit}`;
-  return fetchJson(url, undefined, "sensors");
+  const url = `${API_BASE}/sensors?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`;
+  return jsonFetch(url);
 }
 
-/* ----------------------------- item types ---------------------------- */
+// ---------- Item Types (with route fallback) ----------
 /**
- * GET item types
- * Tries /itemTypes first (new), then /meatTypes (legacy) for compatibility.
- * Returns an array like: [{ name, description }, ...]
+ * Tries GET /itemTypes first; falls back to /meatTypes.
+ * Returns [{ name, description }, ...]
  */
 export async function fetchItemTypes() {
-  const tryUrls = [`${MEAT_API}/itemTypes`, `${MEAT_API}/meatTypes`];
-  for (const url of tryUrls) {
-    try {
-      const data = await fetchJson(url, undefined, "itemTypes");
-      return Array.isArray(data) ? data : [];
-    } catch {
-      // try next path
-    }
+  // Attempt /itemTypes
+  try {
+    const list = await jsonFetch(`${ITEMS_BASE}/itemTypes`);
+    return normalizeItemTypes(list);
+  } catch {
+    // Fallback /meatTypes
+    const list = await jsonFetch(`${ITEMS_BASE}/meatTypes`);
+    return normalizeItemTypes(list);
   }
-  throw new Error("itemTypes not found (tried /itemTypes and /meatTypes)");
 }
 
-/* ------------------------------- advisor ----------------------------- */
-/** POST /advisor -> { advice, used_fallback, model, ... } */
-export async function getAdvisorAdvice(sessionId, probeId) {
-  if (!sessionId) throw new Error("getAdvisorAdvice: sessionId required");
-  if (!probeId) throw new Error("getAdvisorAdvice: probeId required");
-  const url = `${API_BASE}/advisor`;
-  return fetchJson(
-    url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, probe_id: probeId }),
-    },
-    "advisor"
-  );
+function normalizeItemTypes(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((x) => ({
+    name: x.name ?? String(x?.Name ?? ""),
+    description: x.description ?? String(x?.Description ?? ""),
+  }));
 }
 
-/* ------------------------ probe assignments POST --------------------- */
+// ---------- Advisor ----------
 /**
- * POST ManageProbeAssignments
- * Body shape expected by your Lambda:
- * {
- *   sessionId, probeId, itemType, itemWeight,
- *   minAlert, maxAlert, mobileNumber
- * }
+ * POST /advisor
+ * payload: { session_id: string, probe_id: 'probe1_temp'|'probe2_temp'|... }
+ * returns: { advice: string, model?: string, ... }
+ */
+export async function postAdvisor(payload) {
+  if (!payload?.session_id || !payload?.probe_id) {
+    throw new Error("postAdvisor: {session_id, probe_id} required");
+  }
+  return jsonFetch(`${API_BASE}/advisor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// ---------- Assignments ----------
+/**
+ * POST assignment to ManageProbeAssignments
+ * params: { sessionId, probeId, itemType, itemWeight, minAlert, maxAlert, mobileNumber }
+ * lambda expects camelCase keys as below (matches your working curl).
  */
 export async function saveProbeAssignment({
   sessionId,
@@ -104,25 +104,27 @@ export async function saveProbeAssignment({
   maxAlert = null,
   mobileNumber = null,
 }) {
-  if (!sessionId) throw new Error("saveProbeAssignment: sessionId required");
-  if (!probeId) throw new Error("saveProbeAssignment: probeId required");
+  if (!sessionId || !probeId) {
+    throw new Error("saveProbeAssignment: {sessionId, probeId} required");
+  }
+  const payload = {
+    sessionId,
+    probeId,
+    itemType: itemType ?? "",
+    itemWeight: itemWeight ?? "",
+    minAlert: toNullableNumber(minAlert),
+    maxAlert: toNullableNumber(maxAlert),
+    mobileNumber: mobileNumber || null,
+  };
+  return jsonFetch(ASSIGN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
 
-  const url = `${PROBE_API_BASE}/ManageProbeAssignments`;
-  return fetchJson(
-    url,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId,
-        probeId,
-        itemType,
-        itemWeight,
-        minAlert,
-        maxAlert,
-        mobileNumber,
-      }),
-    },
-    "ManageProbeAssignments"
-  );
+function toNullableNumber(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
