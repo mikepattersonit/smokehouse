@@ -1,63 +1,41 @@
 import os
 import json
 from decimal import Decimal
+from typing import Any, Dict, List, Union
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from openai import OpenAI
 
-# ---------------------------
-# Configuration / Constants
-# ---------------------------
-REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-2"))
+# ---------- Config / Environment ----------
+REGION = os.getenv("AWS_REGION", "us-east-2")
 
-# SSM parameter that holds your OpenAI API key (SecureString)
+# OpenAI model selection (override in Lambda env if needed)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+
+# SSM param name for OpenAI API key
 SSM_PARAM_NAME = os.environ.get("OPENAI_API_KEY_PARAM", "/smokehouse/openai/api_key")
 
-# Model & prompting (override via Lambda env vars)
-ADVISOR_MODEL = os.getenv("ADVISOR_MODEL", "gpt-4o-mini")
-ADVISOR_TEMPERATURE = float(os.getenv("ADVISOR_TEMPERATURE", "0.4"))
-ADVISOR_MAX_TOKENS = int(os.getenv("ADVISOR_MAX_TOKENS", "400"))
-ADVISOR_SYSTEM_PROMPT = os.getenv(
-    "ADVISOR_SYSTEM_PROMPT",
-    (
-        "You are the Smokehouse AI Advisor. You provide concise, practical BBQ and smoking advice "
-        "using thermodynamics and food-safety best practices. You consider probe temp history, "
-        "ambient/smoker temps, rise rate, meat cut, and approximate weight. Always call out any "
-        "food-safety risks and give time-left estimates as ranges with assumptions."
-    ),
-)
-
-# DynamoDB
-dynamodb = boto3.resource("dynamodb", region_name=REGION)
+# DynamoDB tables
 PROBE_ASSIGNMENT_TABLE = os.getenv("PROBE_ASSIGNMENT_TABLE", "ProbeAssignments")
 SENSOR_DATA_TABLE = os.getenv("SENSOR_DATA_TABLE", "sensor_data")
 
-# SSM
+# ---------- AWS Clients ----------
 _ssm = boto3.client("ssm", region_name=REGION)
-
+dynamodb = boto3.resource("dynamodb", region_name=REGION)
 
 def _get_openai_key() -> str:
-    """Fetch OpenAI API key from SSM (decrypted). Cache via Lambda execution env reuse."""
     resp = _ssm.get_parameter(Name=SSM_PARAM_NAME, WithDecryption=True)
     return resp["Parameter"]["Value"]
 
+# ---------- OpenAI Client ----------
+client = OpenAI(api_key=_get_openai_key())
 
-# Initialize OpenAI client once per execution environment (speeds warm invocations)
-_OPENAI_CLIENT = None
-
-def _client() -> OpenAI:
-    global _OPENAI_CLIENT
-    if _OPENAI_CLIENT is None:
-        _OPENAI_CLIENT = OpenAI(api_key=_get_openai_key())
-    return _OPENAI_CLIENT
-
-
-# ---------------------------
-# Utilities
-# ---------------------------
-
-def convert_decimal(obj):
+# ---------- Helpers ----------
+def convert_decimal(obj: Any) -> Any:
+    """
+    Recursively convert DynamoDB Decimal to native Python floats.
+    """
     if isinstance(obj, list):
         return [convert_decimal(x) for x in obj]
     if isinstance(obj, dict):
@@ -66,106 +44,166 @@ def convert_decimal(obj):
         return float(obj)
     return obj
 
+def _safe_float(x: Any) -> Union[float, None]:
+    try:
+        if x is None:
+            return None
+        return float(x)
+    except Exception:
+        return None
 
-def _extract_payload(event: dict) -> dict:
-    """Support both direct invocation and API Gateway/Lambda proxy events."""
-    if isinstance(event, dict) and "body" in event:
-        body = event.get("body")
-        if isinstance(body, str):
-            try:
-                return json.loads(body)
-            except Exception:
-                return {}
-        elif isinstance(body, dict):
-            return body
-    # fall back to event as-is
-    return event if isinstance(event, dict) else {}
+def _summarize_temps(temp_history: List[Union[float, int, None]]) -> Dict[str, Any]:
+    vals = [v for v in temp_history if isinstance(v, (int, float)) and v is not None]
+    if not vals:
+        return {
+            "count": 0,
+            "current_temp": None,
+            "min_temp": None,
+            "max_temp": None,
+            "avg_temp": None,
+        }
+    return {
+        "count": len(vals),
+        "current_temp": vals[-1],
+        "min_temp": min(vals),
+        "max_temp": max(vals),
+        "avg_temp": sum(vals) / len(vals),
+    }
 
+def _build_messages(meat_type: str, meat_weight: Union[str, float, int], temp_history: List[Any]) -> List[Dict[str, str]]:
+    """
+    Create a strong instruction set for the model and request structured JSON output.
+    """
+    summary = _summarize_temps([_safe_float(v) for v in temp_history])
 
-# ---------------------------
-# Lambda handler
-# ---------------------------
+    system_msg = (
+        "You are a professional BBQ and smoked-meat coach. "
+        "Given meat type, weight, and recent probe temperatures, estimate time-to-finish and provide clear, "
+        "practical guidance. If the data is insufficient, say so and explain what additional data would help. "
+        "Assume Fahrenheit. Prefer short, actionable tips."
+    )
 
+    user_msg = (
+        f"Meat type: {meat_type}\n"
+        f"Weight (lb): {meat_weight}\n"
+        f"Probe temperature history (most recent last): {temp_history}\n"
+        f"Summary: {summary}\n\n"
+        "Please return strict JSON with this schema:\n"
+        "{\n"
+        '  "eta_hours": number | null,           // estimated hours remaining (may be fractional)\n'
+        '  "doneness_percent": number | null,    // 0-100 estimate\n'
+        '  "stall_detected": boolean,            // true if a stall seems likely/in progress\n'
+        '  "target_internal_temp_f": number | null,\n'
+        '  "recommended_pit_temp_f": number | null,\n'
+        '  "rest_time_minutes": number | null,\n'
+        '  "notes": string                       // concise practical advice\n'
+        "}\n"
+        "Return JSON only—no extra text."
+    )
+
+    return [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": user_msg},
+    ]
+
+def _chat_analyze(meat_type: str, meat_weight: Any, temp_history: List[Any]) -> Dict[str, Any]:
+    """
+    Call OpenAI Chat Completions and parse JSON response with a safe fallback.
+    """
+    messages = _build_messages(meat_type, meat_weight, temp_history)
+
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.3,
+            timeout=20,  # seconds
+        )
+        content = resp.choices[0].message.content if resp.choices else ""
+    except Exception as e:
+        # Bubble up a structured error for the Lambda caller
+        raise RuntimeError(f"OpenAI call failed: {e}")
+
+    # Try to parse JSON strictly
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data
+        return {"notes": str(data)}
+    except Exception:
+        # Fallback: return as plain text under "notes"
+        return {"notes": content or "No content returned from model."}
+
+# ---------- Lambda Handler ----------
 def lambda_handler(event, context):
-    payload = _extract_payload(event)
-
-    session_id = payload.get("session_id")
-    probe_id = payload.get("probe_id")
+    """
+    Expected `event` JSON:
+    {
+      "session_id": "<id>",
+      "probe_id": "<id>"
+    }
+    """
+    # Validate input
+    session_id = event.get("session_id") if isinstance(event, dict) else None
+    probe_id = event.get("probe_id") if isinstance(event, dict) else None
 
     if not session_id or not probe_id:
         return {
             "statusCode": 400,
-            "body": json.dumps({
-                "error": "Missing session_id or probe_id",
-                "example": {"session_id": "2025-09-14T12:00Z", "probe_id": "probe_1"},
-            }),
+            "body": json.dumps({"error": "Missing session_id or probe_id in the request"}),
         }
 
-    # ---------------------------
-    # Probe assignment lookup
-    # ---------------------------
+    # Fetch probe assignment (for meat metadata)
     try:
         probe_table = dynamodb.Table(PROBE_ASSIGNMENT_TABLE)
-        probe_resp = probe_table.query(
+        probe_response = probe_table.query(
             KeyConditionExpression=Key("session_id").eq(session_id) & Key("probe_id").eq(probe_id)
         )
-        if not probe_resp.get("Items"):
-            return {"statusCode": 404, "body": json.dumps({"error": "Probe assignment not found"})}
-        probe_data = probe_resp["Items"][0]
+        items = probe_response.get("Items", [])
+        if not items:
+            return {
+                "statusCode": 404,
+                "body": json.dumps({"error": "Probe assignment not found"}),
+            }
+        probe_data = convert_decimal(items[0])
     except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": f"Probe assignment fetch failed: {e}"})}
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": f"Error fetching probe assignment: {str(e)}"}),
+        }
 
-    # ---------------------------
-    # Sensor data lookup for the session
-    # ---------------------------
+    # Fetch session sensor data (history)
     try:
         sensor_table = dynamodb.Table(SENSOR_DATA_TABLE)
-        sensor_resp = sensor_table.query(KeyConditionExpression=Key("session_id").eq(session_id))
-        sensor_items = [convert_decimal(i) for i in sensor_resp.get("Items", [])]
+        sensor_response = sensor_table.query(
+            KeyConditionExpression=Key("session_id").eq(session_id)
+        )
+        sensor_items = [convert_decimal(item) for item in sensor_response.get("Items", [])]
     except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": f"Sensor data fetch failed: {e}"})}
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": f"Error fetching sensor data: {str(e)}"}),
+        }
 
-    # Extract the probe's temp series (list of floats if present)
-    temp_history = []
-    for item in sensor_items:
-        if probe_id in item:
-            v = item.get(probe_id)
-            # accept numeric or dict {"temp": x}
-            if isinstance(v, (int, float)):
-                temp_history.append(float(v))
-            elif isinstance(v, dict) and "temp" in v and isinstance(v["temp"], (int, float)):
-                temp_history.append(float(v["temp"]))
-
+    # Prepare model inputs
     meat_type = probe_data.get("meat_type", "unknown")
     meat_weight = probe_data.get("weight", "unknown")
 
-    # ---------------------------
-    # Build Chat Completions request (OpenAI SDK v1)
-    # ---------------------------
-    user_prompt = (
-        "You will estimate remaining cook time for smoked meat and provide actionable steps.\n"
-        "Inputs you have:\n"
-        f"- Meat type: {meat_type}\n"
-        f"- Approx weight (lbs): {meat_weight}\n"
-        f"- Probe temp history (°F, ordered oldest→newest): {temp_history}\n"
-        "Assume typical backyard smoker conditions unless ambient/smoker temps are embedded in the series.\n"
-        "Respond with: (1) estimated time remaining as a range with assumptions, (2) target internal temp, "
-        "(3) stall expectations if applicable, (4) concrete adjustments (vents, wrap, rest), (5) food-safety cautions."
-    )
+    # Extract a simple probe-centric series from the session records
+    # (Assumes each record may contain a {probe_id: temp} entry among other fields.)
+    temp_history = [item.get(probe_id) for item in sensor_items if isinstance(item, dict) and (probe_id in item)]
 
+    # Call OpenAI for analysis/advice
     try:
-        client = _client()
-        resp = client.chat.completions.create(
-            model=ADVISOR_MODEL,
-            messages=[
-                {"role": "system", "content": ADVISOR_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=ADVISOR_TEMPERATURE,
-            max_tokens=ADVISOR_MAX_TOKENS,
-        )
-        advice = (resp.choices[0].message.content or "").strip()
+        result = _chat_analyze(meat_type, meat_weight, temp_history)
     except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": f"OpenAI call failed: {e}"})}
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"error": str(e)}),
+        }
 
-    return {"statusCode": 200, "body": json.dumps({"advice": advice})}
+    # Successful response
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"advice": result}),
+    }
