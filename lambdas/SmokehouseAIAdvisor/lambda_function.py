@@ -116,7 +116,7 @@ def _chat_analyze(meat_type: str, meat_weight: Any, temp_history: List[Any]) -> 
         resp = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=messages,
-            temperature=0.3,
+            
             timeout=20,  # seconds
         )
         content = resp.choices[0].message.content if resp.choices else ""
