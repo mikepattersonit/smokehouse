@@ -1,3 +1,23 @@
 .venv/
 __pycache__/
+*.dist-info/
+bin/
+stage/
+# vendored packages (bundled at deploy time)
+openai/
+httpx/
+httpcore/
+anyio/
+sniffio/
+certifi/
+idna/
+h11/
+pydantic/
+pydantic_core/
+annotated_types/
+distro/
+jiter/
+tqdm/
+typing_inspection/
+typing_extensions.py
 
