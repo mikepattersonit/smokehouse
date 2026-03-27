@@ -40,7 +40,6 @@ function fmtElapsed(minutes) {
 }
 
 function computeRateOfRise(data, probeId, window = 10) {
-  // data is newest-first; take last `window` valid readings
   const vals = data
     .map((r) => r[probeId])
     .filter((v) => v != null && parseFloat(v) !== -999)
@@ -50,18 +49,17 @@ function computeRateOfRise(data, probeId, window = 10) {
   const oldest = vals[vals.length - 1];
   const newest = vals[0];
   const delta = newest - oldest;
-  // ~1 reading/min → convert delta over (window-1) readings to °F/hr
   return Math.round((delta / (vals.length - 1)) * 60 * 10) / 10;
 }
 
 function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, onClearAlert, onItemChange, onApplyPitTemp }) {
-  const [itemType,    setItemType]    = useState(probe.itemType   ?? "");
-  const [itemWeight,  setItemWeight]  = useState(probe.itemWeight ?? "");
-  const [minAlert,    setMinAlert]    = useState(probe.minAlert   ?? "");
-  const [maxAlert,    setMaxAlert]    = useState(probe.maxAlert   ?? "");
-  const [configOpen,  setConfigOpen]  = useState(false);
-  const [advisorBusy, setAdvisorBusy] = useState(false);
-  const [advice,      setAdvice]      = useState(null);
+  const [itemType,     setItemType]     = useState(probe.itemType   ?? "");
+  const [itemWeight,   setItemWeight]   = useState(probe.itemWeight ?? "");
+  const [minAlert,     setMinAlert]     = useState(probe.minAlert   ?? "");
+  const [maxAlert,     setMaxAlert]     = useState(probe.maxAlert   ?? "");
+  const [configOpen,   setConfigOpen]   = useState(false);
+  const [advisorBusy,  setAdvisorBusy]  = useState(false);
+  const [advice,       setAdvice]       = useState(null);
   const [adviceCached, setAdviceCached] = useState(false);
 
   useEffect(() => {
@@ -71,6 +69,31 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
     setMaxAlert(probe.maxAlert   ?? "");
     setAdvice(null);
   }, [probe.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Look up the full item definition from itemTypes list
+  const selectedItem = useMemo(
+    () => itemTypes.find((it) => it.name === itemType) || null,
+    [itemTypes, itemType]
+  );
+
+  const isColdSmoke = selectedItem?.smoke_type === "cold";
+
+  // When item selection changes, auto-populate the alert threshold
+  const handleItemTypeChange = useCallback((e) => {
+    const name = e.target.value;
+    setItemType(name);
+    const item = itemTypes.find((it) => it.name === name);
+    if (!item) return;
+    if (item.smoke_type === "cold" && item.max_safe_temp_f != null) {
+      // Cold smoke: set max alert to the safety ceiling
+      setMaxAlert(String(item.max_safe_temp_f));
+      setMinAlert("");
+    } else if (item.target_internal_temp_f != null) {
+      // Hot smoke: set max alert to the target pull temp
+      setMaxAlert(String(item.target_internal_temp_f));
+      setMinAlert("");
+    }
+  }, [itemTypes]);
 
   const rateOfRise = useMemo(() => computeRateOfRise(data, probe.id), [data, probe.id]);
 
@@ -114,7 +137,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
     }
   }, [sessionId, probe.id]);
 
-  const temp = probe.temperature;
+  const temp    = probe.temperature;
   const hasTemp = temp !== null && temp !== undefined;
 
   function rateLabel(ror) {
@@ -123,13 +146,26 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
     return `${sign}${ror}°/hr`;
   }
 
+  // Hint shown below the item selector
+  function tempHint() {
+    if (!selectedItem) return null;
+    if (isColdSmoke && selectedItem.max_safe_temp_f != null)
+      return { text: `Keep below ${selectedItem.max_safe_temp_f}°F`, cold: true };
+    if (selectedItem.target_internal_temp_f != null)
+      return { text: `Pull at ${selectedItem.target_internal_temp_f}°F`, cold: false };
+    return null;
+  }
+  const hint = tempHint();
+
   return (
-    <div className={`probe-card${hasItem ? " probe-card--active" : ""}`}>
+    <div className={`probe-card${hasItem ? " probe-card--active" : ""}${isColdSmoke ? " probe-card--cold" : ""}`}>
       {/* Header */}
       <div className="probe-card__header">
         <span className="probe-card__name">{probe.name}</span>
         {hasItem
-          ? <span className="probe-card__tag probe-card__tag--assigned">{itemType}{itemWeight ? ` · ${itemWeight} lb` : ""}</span>
+          ? <span className={`probe-card__tag ${isColdSmoke ? "probe-card__tag--cold" : "probe-card__tag--assigned"}`}>
+              {isColdSmoke ? "❄ " : ""}{itemType}{itemWeight ? ` · ${itemWeight} lb` : ""}
+            </span>
           : <span className="probe-card__tag probe-card__tag--empty">Unassigned</span>
         }
       </div>
@@ -138,7 +174,9 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
       {hasTemp
         ? (
           <div className="probe-card__temp-block">
-            <span className="probe-card__temp">{Math.round(temp)}</span>
+            <span className={`probe-card__temp${isColdSmoke ? " probe-card__temp--cold" : ""}`}>
+              {Math.round(temp)}
+            </span>
             <span className="probe-card__temp-unit">°F</span>
           </div>
         ) : (
@@ -158,7 +196,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
       )}
 
       {/* Mini sparkline */}
-      <ProbeChart probe={probe} data={data} />
+      <ProbeChart probe={probe} data={data} isColdSmoke={isColdSmoke} />
 
       {/* AI advisor result */}
       {advice && (
@@ -166,12 +204,13 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
           advice={advice}
           cached={adviceCached}
           onApplyPitTemp={onApplyPitTemp}
+          isColdSmoke={isColdSmoke}
         />
       )}
 
       {/* Actions */}
       <div className="probe-card__actions">
-        {hasItem && (
+        {hasItem && !isColdSmoke && (
           <button
             className="probe-btn probe-btn--ai"
             onClick={handleAdvisor}
@@ -195,7 +234,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
             <label>Item</label>
             <select
               value={itemType}
-              onChange={(e) => setItemType(e.target.value)}
+              onChange={handleItemTypeChange}
               onBlur={saveItemDetails}
             >
               <option value="">Select item…</option>
@@ -204,6 +243,13 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
               ))}
             </select>
           </div>
+
+          {hint && (
+            <div className={`config-hint${hint.cold ? " config-hint--cold" : ""}`}>
+              {hint.cold ? "❄" : "🎯"} {hint.text}
+            </div>
+          )}
+
           <div className="config-row">
             <label>Weight</label>
             <input

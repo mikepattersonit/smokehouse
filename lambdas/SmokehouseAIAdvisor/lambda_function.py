@@ -166,44 +166,77 @@ def _build_milestones(rows, session_id, probe_id, n=MILESTONE_POINTS):
     return result
 
 # ---------- Prompt ----------
-def _build_prompt(probe_id, meat_type, meat_weight, target_pit_temp_f,
+def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
+                  item_target_temp, item_max_safe_temp, target_pit_temp_f,
                   warmup_minutes, outside_temp_at_start, avg_pit_temp,
                   rate_of_rise, stall_detected, elapsed_minutes,
                   current_probe_temp, current_pit_temp, milestones):
 
-    system_msg = (
-        "You are an expert BBQ pitmaster coach. Analyze the smokehouse session data and "
-        "provide precise, actionable guidance. All temperatures are Fahrenheit. "
-        "Use warmup time and outside temp to understand how the pit performs in current conditions. "
-        "Use milestones to identify trends, stalls, and whether the cook is on track. "
-        "Be concise and specific — no generic advice. "
-        "Respond with strict JSON only, no markdown or extra text."
-    )
-
-    context = {
-        "meat_type":               meat_type,
-        "weight_lbs":              meat_weight,
-        "target_pit_temp_f":       target_pit_temp_f,
-        "outside_temp_at_start_f": outside_temp_at_start,
-        "warmup_minutes":          warmup_minutes,
-        "avg_pit_temp_f":          avg_pit_temp,
-        "total_elapsed_minutes":   elapsed_minutes,
-        "current_probe_temp_f":    current_probe_temp,
-        "current_pit_temp_f":      current_pit_temp,
-        "rate_of_rise_f_per_hr":   rate_of_rise,
-        "stall_detected":          stall_detected,
-    }
-
-    user_msg = (
-        f"Session context:\n{json.dumps(context)}\n\n"
-        f"Temperature milestones ({len(milestones)} evenly-spaced points; "
-        f"min=elapsed minutes, pit=avg pit temp, probe=probe temp):\n"
-        f"{json.dumps(milestones)}\n\n"
-        "Return strict JSON:\n"
-        '{"eta_hours": number|null, "doneness_percent": number|null, "stall_detected": boolean, '
-        '"target_internal_temp_f": number|null, "recommended_pit_temp_f": number|null, '
-        '"rest_time_minutes": number|null, "notes": string}'
-    )
+    if smoke_type == "cold":
+        system_msg = (
+            "You are an expert cold-smoking coach. The goal is NOT to cook the meat — "
+            "it is to infuse smoke flavor while keeping the product temperature below the "
+            "max_safe_temp_f at all times. Elevated temperatures will melt fat, denature "
+            "proteins prematurely, or create food safety issues. "
+            "All temperatures are Fahrenheit. Be concise and specific. "
+            "Respond with strict JSON only, no markdown or extra text."
+        )
+        context = {
+            "meat_type":             meat_type,
+            "weight_lbs":            meat_weight,
+            "smoke_type":            "cold",
+            "max_safe_temp_f":       item_max_safe_temp,
+            "outside_temp_f":        outside_temp_at_start,
+            "total_elapsed_minutes": elapsed_minutes,
+            "current_probe_temp_f":  current_probe_temp,
+            "current_pit_temp_f":    current_pit_temp,
+            "rate_of_rise_f_per_hr": rate_of_rise,
+        }
+        user_msg = (
+            f"Session context:\n{json.dumps(context)}\n\n"
+            f"Temperature milestones ({len(milestones)} points; min=elapsed minutes, "
+            f"pit=pit temp, probe=product temp):\n{json.dumps(milestones)}\n\n"
+            "Return strict JSON — for cold smoke, eta_hours means remaining safe smoke time, "
+            "doneness_percent is not applicable (null), stall_detected is false unless "
+            "product temp is climbing dangerously:\n"
+            '{"eta_hours": number|null, "doneness_percent": null, "stall_detected": false, '
+            '"target_internal_temp_f": null, "recommended_pit_temp_f": number|null, '
+            '"rest_time_minutes": null, "notes": string}'
+        )
+    else:
+        system_msg = (
+            "You are an expert BBQ pitmaster coach. Analyze the smokehouse session data and "
+            "provide precise, actionable guidance. All temperatures are Fahrenheit. "
+            "Use warmup time and outside temp to understand how the pit performs in current conditions. "
+            "Use milestones to identify trends, stalls, and whether the cook is on track. "
+            "Be concise and specific — no generic advice. "
+            "Respond with strict JSON only, no markdown or extra text."
+        )
+        context = {
+            "meat_type":               meat_type,
+            "weight_lbs":              meat_weight,
+            "smoke_type":              "hot",
+            "target_internal_temp_f":  item_target_temp,
+            "target_pit_temp_f":       target_pit_temp_f,
+            "outside_temp_at_start_f": outside_temp_at_start,
+            "warmup_minutes":          warmup_minutes,
+            "avg_pit_temp_f":          avg_pit_temp,
+            "total_elapsed_minutes":   elapsed_minutes,
+            "current_probe_temp_f":    current_probe_temp,
+            "current_pit_temp_f":      current_pit_temp,
+            "rate_of_rise_f_per_hr":   rate_of_rise,
+            "stall_detected":          stall_detected,
+        }
+        user_msg = (
+            f"Session context:\n{json.dumps(context)}\n\n"
+            f"Temperature milestones ({len(milestones)} evenly-spaced points; "
+            f"min=elapsed minutes, pit=avg pit temp, probe=probe temp):\n"
+            f"{json.dumps(milestones)}\n\n"
+            "Return strict JSON:\n"
+            '{"eta_hours": number|null, "doneness_percent": number|null, "stall_detected": boolean, '
+            '"target_internal_temp_f": number|null, "recommended_pit_temp_f": number|null, '
+            '"rest_time_minutes": number|null, "notes": string}'
+        )
 
     return system_msg, user_msg
 
@@ -253,6 +286,19 @@ def lambda_handler(event, context):
 
     meat_type   = probe_data.get("item_type") or probe_data.get("meat_type") or "unknown"
     meat_weight = probe_data.get("item_weight") or probe_data.get("weight") or "unknown"
+
+    # Look up smoke_type and target temp from meat_types table
+    smoke_type            = "hot"
+    item_target_temp      = None
+    item_max_safe_temp    = None
+    try:
+        item_row = _ddb.Table("meat_types").get_item(Key={"name": meat_type}).get("Item")
+        if item_row:
+            smoke_type         = _to_native(item_row).get("smoke_type", "hot")
+            item_target_temp   = _to_native(item_row).get("target_internal_temp_f")
+            item_max_safe_temp = _to_native(item_row).get("max_safe_temp_f")
+    except Exception:
+        pass
 
     # 2. Check advice cache
     now          = int(time.time())
@@ -336,6 +382,9 @@ def lambda_handler(event, context):
         probe_id              = probe_id,
         meat_type             = meat_type,
         meat_weight           = meat_weight,
+        smoke_type            = smoke_type,
+        item_target_temp      = item_target_temp,
+        item_max_safe_temp    = item_max_safe_temp,
         target_pit_temp_f     = target_pit_temp_f,
         warmup_minutes        = session_analytics.get("warmup_minutes"),
         outside_temp_at_start = session_analytics.get("outside_temp_at_start"),
