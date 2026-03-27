@@ -1,6 +1,8 @@
 .session-selector {
   position: relative;
-  display: inline-block;
+  min-width: 0;
+  flex: 1;
+  max-width: 360px;
 }
 
 .session-selector__button {
@@ -15,6 +17,9 @@
   font-size: 0.85rem;
   cursor: pointer;
   white-space: nowrap;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .session-selector__button:hover:not(:disabled) {
@@ -32,9 +37,18 @@
   color: #4caf50;
 }
 
+.session-selector__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
 .session-selector__chevron {
   font-size: 0.65rem;
   opacity: 0.7;
+  flex-shrink: 0;
 }
 
 .session-selector__list {
@@ -43,6 +57,7 @@
   left: 0;
   z-index: 100;
   min-width: 260px;
+  max-width: min(360px, calc(100vw - 28px));
   max-height: 320px;
   overflow-y: auto;
   margin: 0;

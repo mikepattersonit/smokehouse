@@ -175,12 +175,31 @@ export default function App() {
     <div>
       {/* HEADER */}
       <header className="app-header">
-        <div className="header-left">
-          <div className="app-logo">Smoke<span>GPT</span></div>
-          {isLive
-            ? <div className="live-badge"><div className="live-dot" />Live</div>
-            : <div className="historical-badge">Historical</div>
-          }
+        <div className="header-top-row">
+          <div className="header-left">
+            <div className="app-logo">Smoke<span>GPT</span></div>
+            {isLive
+              ? <div className="live-badge"><div className="live-dot" />Live</div>
+              : <div className="historical-badge">Historical</div>
+            }
+          </div>
+          <div className="header-right">
+            {loading && <span className="header-loading">Loading…</span>}
+            {error   && <span className="header-error">{error}</span>}
+            <div className="mobile-field">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/>
+              </svg>
+              <input
+                type="tel"
+                placeholder="(555) 123-4567"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="header-session-row">
           <SessionSelector
             sessions={sessions}
             currentId={sessionId}
@@ -193,21 +212,6 @@ export default function App() {
               ← Live
             </button>
           )}
-        </div>
-        <div className="header-right">
-          {loading && <span className="header-loading">Loading…</span>}
-          {error   && <span className="header-error">{error}</span>}
-          <div className="mobile-field">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/>
-            </svg>
-            <input
-              type="tel"
-              placeholder="(555) 123-4567"
-              value={mobileNumber}
-              onChange={(e) => setMobileNumber(e.target.value)}
-            />
-          </div>
         </div>
       </header>
 

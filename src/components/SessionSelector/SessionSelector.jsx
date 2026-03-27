@@ -43,7 +43,7 @@ export default function SessionSelector({ sessions, currentId, selectedId, onSel
         aria-expanded={open}
         disabled={loading}
       >
-        {label}
+        <span className="session-selector__label">{label}</span>
         <span className="session-selector__chevron">{open ? '▲' : '▼'}</span>
       </button>
 
