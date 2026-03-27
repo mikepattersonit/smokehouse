@@ -1,22 +1,6 @@
 const TZ = 'America/Chicago';
 
 /**
- * Parse a session_id in YYYYMMDDHHMMSS format into a Date.
- * The digits are treated as local America/Chicago time.
- */
-function sessionIdToDate(sessionId) {
-  const s = String(sessionId);
-  if (s.length < 14) return null;
-  // Build an ISO string with offset so Date parses it correctly
-  const iso = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}`;
-  // Use Intl to get the UTC offset for that local time
-  const d = new Date(iso + 'Z'); // parse as UTC first to get a Date object
-  // Then reinterpret as Chicago local time via a trick: format in UTC offset
-  // Simplest reliable approach: format a known UTC epoch and adjust
-  return d;
-}
-
-/**
  * Format a session_id (YYYYMMDDHHMMSS, Chicago local) as a readable string.
  * e.g. "20251225184651" -> "Dec 25, 2025, 6:46 PM"
  */
