@@ -94,6 +94,19 @@ export async function postAdvisor(payload) {
   });
 }
 
+// ---------- Session settings ----------
+/**
+ * POST /sessions/update
+ * payload: { session_id, target_pit_temp_f }
+ */
+export async function updateSession(payload) {
+  return jsonFetch(`${API_BASE}/sessions/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---------- Assignments ----------
 /**
  * POST assignment to ManageProbeAssignments

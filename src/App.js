@@ -5,7 +5,7 @@ import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
 import ProbeChart from "./components/ProbeCard/ProbeChart";
-import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession } from "./api";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
 import axios from "axios";
 
@@ -24,6 +24,7 @@ export default function App() {
   const [sensorData, setSensorData] = useState([]);
   const [itemTypes, setItemTypes] = useState([]); // formerly "meat types"
   const [alerts, setAlerts] = useState([]);
+  const [targetPitTemp, setTargetPitTemp] = useState("");
 
   // ---- UI state ----
   const [loading, setLoading] = useState(false);
@@ -186,6 +187,15 @@ export default function App() {
     setSelectedSessionId(sid);
   }, []);
 
+  const handleApplyPitTemp = useCallback(async (temp) => {
+    setTargetPitTemp(String(temp));
+    try {
+      await updateSession({ session_id: sessionId, target_pit_temp_f: temp });
+    } catch (e) {
+      console.error("Failed to save target pit temp:", e); // eslint-disable-line no-console
+    }
+  }, [sessionId]);
+
   // Alerts
   const onClearAlert = useCallback((probeId) => {
     setAlerts((prev) => prev.filter((a) => a.probeId !== probeId));
@@ -270,6 +280,25 @@ export default function App() {
               <Row label="Bottom" value={valOrNA(smokehouseStatus.bottom)} />
               <Row label="Humidity (%)" value={valOrNA(smokehouseStatus.humidity)} />
               <Row label="Smoke (ppm)" value={valOrNA(smokehouseStatus.smokePPM)} />
+              <div className="input-group" style={{ marginTop: 10 }}>
+                <label>Target pit temp (°F):</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="50"
+                  max="500"
+                  value={targetPitTemp}
+                  onChange={(e) => setTargetPitTemp(e.target.value)}
+                  onBlur={() => {
+                    if (targetPitTemp && sessionId) {
+                      updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTemp) })
+                        .catch(() => {});
+                    }
+                  }}
+                  placeholder="e.g. 225"
+                  style={{ width: 80, padding: 4, marginLeft: 8 }}
+                />
+              </div>
             </div>
 
             <div className="smokehouse-chart-container" style={{ flex: 1 }}>
@@ -299,9 +328,8 @@ export default function App() {
                 onClearAlert={onClearAlert}
                 onMeatChange={(id, t, w) => handleItemChange(id, t, w)}
                 meatTypes={itemTypes || []}
-                // App persists assignments itself to PROBE_ASSIGNMENT_URL;
-                // ProbeCard just calls onMeatChange.
-                sessionId={sessionId}
+                sessionId={selectedSessionId || sessionId}
+                onApplyPitTemp={handleApplyPitTemp}
               />
               <div className="probe-chart-container" style={{ flex: 1 }}>
                 <ProbeChart probe={probe} data={sensorData} />
