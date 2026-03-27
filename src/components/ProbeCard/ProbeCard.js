@@ -4,6 +4,7 @@ import "./ProbeCard.css";
 import { postAdvisor } from "../../api";
 import AdvisorPanel from "./AdvisorPanel";
 import ProbeChart from "./ProbeChart";
+import { toDisplay, fromDisplay, unitLabel } from "../../utils/temperature";
 
 function elapsedMinutes(sessionId, timestamp) {
   try {
@@ -52,11 +53,12 @@ function computeRateOfRise(data, probeId, window = 10) {
   return Math.round((delta / (vals.length - 1)) * 60 * 10) / 10;
 }
 
-function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, onClearAlert, onItemChange, onApplyPitTemp }) {
+function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp }) {
   const [itemType,     setItemType]     = useState(probe.itemType   ?? "");
   const [itemWeight,   setItemWeight]   = useState(probe.itemWeight ?? "");
-  const [minAlert,     setMinAlert]     = useState(probe.minAlert   ?? "");
-  const [maxAlert,     setMaxAlert]     = useState(probe.maxAlert   ?? "");
+  // alerts stored internally in °F
+  const [minAlertF,    setMinAlertF]    = useState(probe.minAlert   ?? "");
+  const [maxAlertF,    setMaxAlertF]    = useState(probe.maxAlert   ?? "");
   const [configOpen,   setConfigOpen]   = useState(false);
   const [advisorBusy,  setAdvisorBusy]  = useState(false);
   const [advice,       setAdvice]       = useState(null);
@@ -65,37 +67,34 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
   useEffect(() => {
     setItemType(probe.itemType   ?? "");
     setItemWeight(probe.itemWeight ?? "");
-    setMinAlert(probe.minAlert   ?? "");
-    setMaxAlert(probe.maxAlert   ?? "");
+    setMinAlertF(probe.minAlert  ?? "");
+    setMaxAlertF(probe.maxAlert  ?? "");
     setAdvice(null);
   }, [probe.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Look up the full item definition from itemTypes list
   const selectedItem = useMemo(
     () => itemTypes.find((it) => it.name === itemType) || null,
     [itemTypes, itemType]
   );
 
   const isColdSmoke = selectedItem?.smoke_type === "cold";
+  const ul = unitLabel(unit);
 
-  // When item selection changes, auto-populate the alert threshold
   const handleItemTypeChange = useCallback((e) => {
     const name = e.target.value;
     setItemType(name);
     const item = itemTypes.find((it) => it.name === name);
     if (!item) return;
     if (item.smoke_type === "cold" && item.max_safe_temp_f != null) {
-      // Cold smoke: set max alert to the safety ceiling
-      setMaxAlert(String(item.max_safe_temp_f));
-      setMinAlert("");
+      setMaxAlertF(String(item.max_safe_temp_f));
+      setMinAlertF("");
     } else if (item.target_internal_temp_f != null) {
-      // Hot smoke: set max alert to the target pull temp
-      setMaxAlert(String(item.target_internal_temp_f));
-      setMinAlert("");
+      setMaxAlertF(String(item.target_internal_temp_f));
+      setMinAlertF("");
     }
   }, [itemTypes]);
 
-  const rateOfRise = useMemo(() => computeRateOfRise(data, probe.id), [data, probe.id]);
+  const rateOfRiseF = useMemo(() => computeRateOfRise(data, probe.id), [data, probe.id]);
 
   const elapsed = useMemo(() => {
     const latestRow = data[0];
@@ -110,13 +109,13 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
   }, [onItemChange, probe.id, itemType, itemWeight]);
 
   const saveAlerts = useCallback(() => {
-    onSetAlert?.(probe.id, minAlert, maxAlert);
+    onSetAlert?.(probe.id, minAlertF, maxAlertF);
     setConfigOpen(false);
-  }, [onSetAlert, probe.id, minAlert, maxAlert]);
+  }, [onSetAlert, probe.id, minAlertF, maxAlertF]);
 
   const clearAlerts = useCallback(() => {
-    setMinAlert("");
-    setMaxAlert("");
+    setMinAlertF("");
+    setMaxAlertF("");
     onClearAlert?.(probe.id);
   }, [onClearAlert, probe.id]);
 
@@ -137,25 +136,36 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
     }
   }, [sessionId, probe.id]);
 
-  const temp    = probe.temperature;
+  const temp    = probe.temperature; // always °F
   const hasTemp = temp !== null && temp !== undefined;
+  const tempDisplay = hasTemp ? toDisplay(temp, unit) : null;
 
-  function rateLabel(ror) {
-    if (ror === null) return null;
-    const sign = ror >= 0 ? "+" : "";
-    return `${sign}${ror}°/hr`;
+  function rateLabel(rorF) {
+    if (rorF === null) return null;
+    const rorDisplay = unit === "C"
+      ? Math.round(rorF * 5 / 9 * 10) / 10  // convert delta °F/hr to delta °C/hr
+      : rorF;
+    const sign = rorDisplay >= 0 ? "+" : "";
+    return `${sign}${rorDisplay}${ul}/hr`;
   }
 
-  // Hint shown below the item selector
   function tempHint() {
     if (!selectedItem) return null;
-    if (isColdSmoke && selectedItem.max_safe_temp_f != null)
-      return { text: `Keep below ${selectedItem.max_safe_temp_f}°F`, cold: true };
-    if (selectedItem.target_internal_temp_f != null)
-      return { text: `Pull at ${selectedItem.target_internal_temp_f}°F`, cold: false };
+    if (isColdSmoke && selectedItem.max_safe_temp_f != null) {
+      const v = toDisplay(selectedItem.max_safe_temp_f, unit);
+      return { text: `Keep below ${v}${ul}`, cold: true };
+    }
+    if (selectedItem.target_internal_temp_f != null) {
+      const v = toDisplay(selectedItem.target_internal_temp_f, unit);
+      return { text: `Pull at ${v}${ul}`, cold: false };
+    }
     return null;
   }
   const hint = tempHint();
+
+  // Alert display values (convert from stored °F)
+  const minAlertDisplay = minAlertF !== "" ? (toDisplay(Number(minAlertF), unit) ?? "") : "";
+  const maxAlertDisplay = maxAlertF !== "" ? (toDisplay(Number(maxAlertF), unit) ?? "") : "";
 
   return (
     <div className={`probe-card${hasItem ? " probe-card--active" : ""}${isColdSmoke ? " probe-card--cold" : ""}`}>
@@ -171,26 +181,23 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
       </div>
 
       {/* Temperature */}
-      {hasTemp
-        ? (
-          <div className="probe-card__temp-block">
-            <span className={`probe-card__temp${isColdSmoke ? " probe-card__temp--cold" : ""}`}>
-              {Math.round(temp)}
-            </span>
-            <span className="probe-card__temp-unit">°F</span>
-          </div>
-        ) : (
-          <div className="probe-card__temp-block">
-            <span className="probe-card__temp probe-card__temp--na">—</span>
-          </div>
-        )
-      }
+      <div className="probe-card__temp-block">
+        {tempDisplay != null
+          ? <>
+              <span className={`probe-card__temp${isColdSmoke ? " probe-card__temp--cold" : ""}`}>
+                {tempDisplay}
+              </span>
+              <span className="probe-card__temp-unit">{ul}</span>
+            </>
+          : <span className="probe-card__temp probe-card__temp--na">—</span>
+        }
+      </div>
 
       {/* Meta row */}
-      {(rateOfRise !== null || elapsed !== null) && (
+      {(rateOfRiseF !== null || elapsed !== null) && (
         <div className="probe-card__meta">
-          {rateLabel(rateOfRise) && <strong>{rateLabel(rateOfRise)}</strong>}
-          {rateOfRise !== null && elapsed !== null && <span className="probe-card__meta-sep">·</span>}
+          {rateLabel(rateOfRiseF) && <strong>{rateLabel(rateOfRiseF)}</strong>}
+          {rateOfRiseF !== null && elapsed !== null && <span className="probe-card__meta-sep">·</span>}
           {elapsed !== null && <span>{fmtElapsed(elapsed)} elapsed</span>}
         </div>
       )}
@@ -203,6 +210,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
         <AdvisorPanel
           advice={advice}
           cached={adviceCached}
+          unit={unit}
           onApplyPitTemp={onApplyPitTemp}
           isColdSmoke={isColdSmoke}
         />
@@ -211,18 +219,11 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
       {/* Actions */}
       <div className="probe-card__actions">
         {hasItem && !isColdSmoke && (
-          <button
-            className="probe-btn probe-btn--ai"
-            onClick={handleAdvisor}
-            disabled={advisorBusy}
-          >
+          <button className="probe-btn probe-btn--ai" onClick={handleAdvisor} disabled={advisorBusy}>
             {advisorBusy ? "Getting AI…" : advice ? "↻ Refresh AI" : "🤖 AI Guidance"}
           </button>
         )}
-        <button
-          className="probe-btn probe-btn--config"
-          onClick={() => setConfigOpen((o) => !o)}
-        >
+        <button className="probe-btn probe-btn--config" onClick={() => setConfigOpen((o) => !o)}>
           {configOpen ? "✕ Close" : "⚙ Configure"}
         </button>
       </div>
@@ -232,11 +233,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
         <div className="probe-card__config">
           <div className="config-row">
             <label>Item</label>
-            <select
-              value={itemType}
-              onChange={handleItemTypeChange}
-              onBlur={saveItemDetails}
-            >
+            <select value={itemType} onChange={handleItemTypeChange} onBlur={saveItemDetails}>
               <option value="">Select item…</option>
               {itemTypes.map((it) => (
                 <option key={it.name} value={it.name}>{it.name}</option>
@@ -264,28 +261,34 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], onSetAlert, on
             />
           </div>
           <div className="config-row">
-            <label>Alert °F</label>
+            <label>Alert {ul}</label>
             <div className="config-alert-range">
               <input
                 type="number"
                 inputMode="numeric"
-                value={minAlert}
-                onChange={(e) => setMinAlert(e.target.value)}
+                value={minAlertDisplay}
+                onChange={(e) => {
+                  const f = fromDisplay(e.target.value, unit);
+                  setMinAlertF(f != null ? String(f) : "");
+                }}
                 placeholder="Min"
               />
               <span>–</span>
               <input
                 type="number"
                 inputMode="numeric"
-                value={maxAlert}
-                onChange={(e) => setMaxAlert(e.target.value)}
+                value={maxAlertDisplay}
+                onChange={(e) => {
+                  const f = fromDisplay(e.target.value, unit);
+                  setMaxAlertF(f != null ? String(f) : "");
+                }}
                 placeholder="Max"
               />
             </div>
           </div>
           <div className="config-actions">
             <button className="probe-btn probe-btn--save" onClick={saveAlerts}>Save</button>
-            {(minAlert || maxAlert) && (
+            {(minAlertF || maxAlertF) && (
               <button className="probe-btn probe-btn--clear" onClick={clearAlerts}>Clear alerts</button>
             )}
           </div>

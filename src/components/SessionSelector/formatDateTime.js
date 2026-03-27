@@ -1,6 +1,36 @@
 const TZ = 'America/Chicago';
 
 /**
+ * Parse a session_id (YYYYMMDDHHMMSS, Chicago local) into a UTC Date object.
+ * Returns null if the input is invalid.
+ */
+export function sessionIdToDate(sessionId) {
+  const s = String(sessionId);
+  if (s.length < 14) return null;
+  const year  = parseInt(s.slice(0, 4), 10);
+  const month = parseInt(s.slice(4, 6), 10) - 1;
+  const day   = parseInt(s.slice(6, 8), 10);
+  const hour  = parseInt(s.slice(8, 10), 10);
+  const min   = parseInt(s.slice(10, 12), 10);
+  const sec   = parseInt(s.slice(12, 14), 10);
+
+  const approxUtc = new Date(Date.UTC(year, month, day, hour, min, sec));
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(approxUtc);
+  const p = {};
+  parts.forEach(({ type, value }) => { p[type] = value; });
+  const offsetMs =
+    Date.UTC(parseInt(p.year), parseInt(p.month) - 1, parseInt(p.day),
+             parseInt(p.hour), parseInt(p.minute), parseInt(p.second)) -
+    Date.UTC(year, month, day, hour, min, sec);
+  return new Date(approxUtc.getTime() - offsetMs);
+}
+
+/**
  * Format a session_id (YYYYMMDDHHMMSS, Chicago local) as a readable string.
  * e.g. "20251225184651" -> "Dec 25, 2025, 6:46 PM"
  */

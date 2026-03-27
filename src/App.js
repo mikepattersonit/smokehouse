@@ -6,12 +6,22 @@ import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
 import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession } from "./api";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
+import { sessionIdToDate } from "./components/SessionSelector/formatDateTime";
+import { toDisplay, fromDisplay, unitLabel } from "./utils/temperature";
 import axios from "axios";
 
 const POLL_MS = 15000;
 
 const PROBE_ASSIGNMENT_URL =
   "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
+
+function fmtElapsed(ms) {
+  if (ms == null || ms < 0) return null;
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
 export default function App() {
   const [sessionId, setSessionId] = useState("");
@@ -21,11 +31,14 @@ export default function App() {
   const [sensorData, setSensorData] = useState([]);
   const [itemTypes, setItemTypes] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [targetPitTemp, setTargetPitTemp] = useState("");
+  const [targetPitTempF, setTargetPitTempF] = useState(""); // always stored in °F
   const [mobileNumber, setMobileNumber] = useState("");
+  const [unit, setUnit] = useState("F"); // 'F' | 'C'
+  const [sessionElapsed, setSessionElapsed] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const timerRef = useRef(null);
+  const clockRef = useRef(null);
   const inFlightRef = useRef(false);
 
   const [probes, setProbes] = useState([
@@ -37,10 +50,10 @@ export default function App() {
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
 
   const smokehouseStatus = useMemo(() => ({
-    outside: pickNum(latest.outside_temp, latest.internal_temp),
-    top:     pickNum(latest.top_temp),
-    middle:  pickNum(latest.middle_temp),
-    bottom:  pickNum(latest.bottom_temp),
+    outside:  pickNum(latest.outside_temp, latest.internal_temp),
+    top:      pickNum(latest.top_temp),
+    middle:   pickNum(latest.middle_temp),
+    bottom:   pickNum(latest.bottom_temp),
     humidity: pickNum(latest.humidity),
     smokePPM: pickNum(latest.smoke_ppm),
   }), [latest]);
@@ -53,6 +66,22 @@ export default function App() {
     }
     return null;
   }
+
+  // Session clock — ticks every minute when live
+  const isLive = !selectedSessionId || selectedSessionId === sessionId;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const startDate = sessionIdToDate(sessionId);
+    if (!startDate) return;
+
+    function tick() {
+      setSessionElapsed(Date.now() - startDate.getTime());
+    }
+    tick();
+    clockRef.current = setInterval(tick, 60000);
+    return () => clearInterval(clockRef.current);
+  }, [sessionId]);
 
   const resolveSessionId = useCallback(async () => {
     const res = await fetchLatestSession();
@@ -115,7 +144,6 @@ export default function App() {
     return () => { mounted = false; };
   }, []);
 
-  const isLive = !selectedSessionId || selectedSessionId === sessionId;
   useEffect(() => {
     refreshData();
     if (timerRef.current) clearInterval(timerRef.current);
@@ -125,10 +153,10 @@ export default function App() {
 
   const handleSessionSelect = useCallback((sid) => setSelectedSessionId(sid), []);
 
-  const handleApplyPitTemp = useCallback(async (temp) => {
-    setTargetPitTemp(String(temp));
+  const handleApplyPitTemp = useCallback(async (tempF) => {
+    setTargetPitTempF(String(tempF));
     try {
-      await updateSession({ session_id: sessionId, target_pit_temp_f: temp });
+      await updateSession({ session_id: sessionId, target_pit_temp_f: tempF });
     } catch (e) {
       console.error("Failed to save target pit temp:", e); // eslint-disable-line no-console
     }
@@ -138,12 +166,12 @@ export default function App() {
     setAlerts((prev) => prev.filter((a) => a.probeId !== probeId));
   }, []);
 
-  const handleSetAlert = useCallback((id, min, max) => {
+  const handleSetAlert = useCallback((id, minF, maxF) => {
     const current = probes.find((p) => p.id === id);
     const probeName = current?.name || id;
     setAlerts((prev) => [
       ...prev,
-      { probeId: id, min, max, probeName, active: true, mobileNumber },
+      { probeId: id, min: minF, max: maxF, probeName, active: true, mobileNumber },
     ]);
   }, [probes, mobileNumber]);
 
@@ -158,18 +186,25 @@ export default function App() {
     }
   }, [sessionId]);
 
-  // Temp classification for status strip color
-  function tempClass(val) {
-    if (val === null) return "na";
-    if (val >= 200) return "hot";
-    if (val >= 150) return "warm";
+  // Pit temp display value (convert F→display unit)
+  const pitTempDisplay = targetPitTempF !== ""
+    ? toDisplay(Number(targetPitTempF), unit) ?? ""
+    : "";
+
+  function tempClass(valF) {
+    if (valF === null) return "na";
+    if (valF >= 200) return "hot";
+    if (valF >= 150) return "warm";
     return "";
   }
 
-  function fmtVal(val, na = "—") {
-    if (val === null || val === undefined) return na;
-    return typeof val === "number" ? val.toFixed(0) : val;
+  function fmtStat(valF) {
+    if (valF === null || valF === undefined) return "—";
+    const v = toDisplay(valF, unit);
+    return v == null ? "—" : String(v);
   }
+
+  const ul = unitLabel(unit);
 
   return (
     <div>
@@ -178,14 +213,27 @@ export default function App() {
         <div className="header-top-row">
           <div className="header-left">
             <div className="app-logo">Smoke<span>GPT</span></div>
-            {isLive
-              ? <div className="live-badge"><div className="live-dot" />Live</div>
-              : <div className="historical-badge">Historical</div>
-            }
+            {isLive ? (
+              <div className="live-badge">
+                <div className="live-dot" />
+                Live
+                {sessionElapsed != null && (
+                  <span className="session-clock">{fmtElapsed(sessionElapsed)}</span>
+                )}
+              </div>
+            ) : (
+              <div className="historical-badge">Historical</div>
+            )}
           </div>
           <div className="header-right">
             {loading && <span className="header-loading">Loading…</span>}
             {error   && <span className="header-error">{error}</span>}
+            <button
+              className={`unit-toggle${unit === "C" ? " unit-toggle--active" : ""}`}
+              onClick={() => setUnit((u) => u === "F" ? "C" : "F")}
+            >
+              °{unit === "F" ? "C" : "F"}
+            </button>
             <div className="mobile-field">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/>
@@ -217,45 +265,29 @@ export default function App() {
 
       {/* STATUS STRIP */}
       <div className="status-strip">
-        <div className="stat-cell">
-          <span className="stat-label">Outside</span>
-          <span className={`stat-value ${tempClass(smokehouseStatus.outside)}`}>
-            {fmtVal(smokehouseStatus.outside)}
-          </span>
-          <span className="stat-unit">°F</span>
-        </div>
-        <div className="stat-cell">
-          <span className="stat-label">Top</span>
-          <span className={`stat-value ${tempClass(smokehouseStatus.top)}`}>
-            {fmtVal(smokehouseStatus.top)}
-          </span>
-          <span className="stat-unit">°F</span>
-        </div>
-        <div className="stat-cell">
-          <span className="stat-label">Middle</span>
-          <span className={`stat-value ${tempClass(smokehouseStatus.middle)}`}>
-            {fmtVal(smokehouseStatus.middle)}
-          </span>
-          <span className="stat-unit">°F</span>
-        </div>
-        <div className="stat-cell">
-          <span className="stat-label">Bottom</span>
-          <span className={`stat-value ${tempClass(smokehouseStatus.bottom)}`}>
-            {fmtVal(smokehouseStatus.bottom)}
-          </span>
-          <span className="stat-unit">°F</span>
-        </div>
+        {[
+          { label: "Outside", val: smokehouseStatus.outside },
+          { label: "Top",     val: smokehouseStatus.top },
+          { label: "Middle",  val: smokehouseStatus.middle },
+          { label: "Bottom",  val: smokehouseStatus.bottom },
+        ].map(({ label, val }) => (
+          <div className="stat-cell" key={label}>
+            <span className="stat-label">{label}</span>
+            <span className={`stat-value ${tempClass(val)}`}>{fmtStat(val)}</span>
+            <span className="stat-unit">{ul}</span>
+          </div>
+        ))}
         <div className="stat-cell">
           <span className="stat-label">Humidity</span>
-          <span className={`stat-value ${smokehouseStatus.humidity === null ? "na" : ""}`}>
-            {fmtVal(smokehouseStatus.humidity)}
+          <span className={`stat-value ${smokehouseStatus.humidity == null ? "na" : ""}`}>
+            {smokehouseStatus.humidity != null ? smokehouseStatus.humidity : "—"}
           </span>
           <span className="stat-unit">%</span>
         </div>
         <div className="stat-cell">
           <span className="stat-label">Smoke</span>
-          <span className={`stat-value ${smokehouseStatus.smokePPM === null ? "na" : ""}`}>
-            {fmtVal(smokehouseStatus.smokePPM)}
+          <span className={`stat-value ${smokehouseStatus.smokePPM == null ? "na" : ""}`}>
+            {smokehouseStatus.smokePPM != null ? smokehouseStatus.smokePPM : "—"}
           </span>
           <span className="stat-unit">ppm</span>
         </div>
@@ -267,24 +299,27 @@ export default function App() {
         <input
           type="number"
           inputMode="numeric"
-          min="50"
-          max="500"
-          value={targetPitTemp}
-          onChange={(e) => setTargetPitTemp(e.target.value)}
-          onBlur={() => {
-            if (targetPitTemp && sessionId)
-              updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTemp) }).catch(() => {});
+          min={unit === "C" ? "10" : "50"}
+          max={unit === "C" ? "260" : "500"}
+          value={pitTempDisplay}
+          onChange={(e) => {
+            const f = fromDisplay(e.target.value, unit);
+            setTargetPitTempF(f != null ? String(f) : "");
           }}
-          placeholder="e.g. 225"
+          onBlur={() => {
+            if (targetPitTempF && sessionId)
+              updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTempF) }).catch(() => {});
+          }}
+          placeholder={unit === "C" ? "e.g. 107" : "e.g. 225"}
         />
-        <span style={{ color: "var(--text3)" }}>°F</span>
+        <span style={{ color: "var(--text3)" }}>{ul}</span>
       </div>
 
       {/* MAIN CHART */}
       <div className="main-chart-section">
         <div className="section-label">Smokehouse Temperature History</div>
         {sensorData.length > 0
-          ? <Chart data={sensorData} sessionId={selectedSessionId || sessionId} />
+          ? <Chart data={sensorData} sessionId={selectedSessionId || sessionId} unit={unit} />
           : <div style={{ color: "var(--text3)", fontSize: "0.85rem", padding: "20px 0" }}>No data yet.</div>
         }
         <div className="chart-legend">
@@ -306,6 +341,7 @@ export default function App() {
               data={sensorData}
               sessionId={selectedSessionId || sessionId}
               itemTypes={itemTypes || []}
+              unit={unit}
               onSetAlert={handleSetAlert}
               onClearAlert={onClearAlert}
               onItemChange={handleItemChange}
