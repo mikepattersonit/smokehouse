@@ -153,7 +153,11 @@ export default function App() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [refreshData, isLive]);
 
-  const handleSessionSelect = useCallback((sid) => setSelectedSessionId(sid), []);
+  const handleSessionSelect = useCallback((sid) => {
+    selectedSessionIdRef.current = sid;
+    setSelectedSessionId(sid);
+    refreshData();
+  }, [refreshData]);
 
   const handleApplyPitTemp = useCallback(async (tempF) => {
     setTargetPitTempF(String(tempF));
