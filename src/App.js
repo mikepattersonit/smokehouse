@@ -35,6 +35,7 @@ export default function App() {
   const [mobileNumber, setMobileNumber] = useState("");
   const [unit, setUnit] = useState("F"); // 'F' | 'C'
   const [sessionElapsed, setSessionElapsed] = useState(null);
+  const [sessionActive, setSessionActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const timerRef = useRef(null);
@@ -67,8 +68,8 @@ export default function App() {
     return null;
   }
 
-  // Session clock — ticks every minute when live
-  const isLive = !selectedSessionId || selectedSessionId === sessionId;
+  // isLive: viewing the latest session AND the smokehouse is actively sending data
+  const isLive = (!selectedSessionId || selectedSessionId === sessionId) && sessionActive;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -85,6 +86,7 @@ export default function App() {
 
   const resolveSessionId = useCallback(async () => {
     const res = await fetchLatestSession();
+    setSessionActive(res.status === "active");
     return String(res.session_id || "");
   }, []);
 
