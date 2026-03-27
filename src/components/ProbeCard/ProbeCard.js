@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import "./ProbeCard.css";
 import { postAdvisor } from "../../api";
+import AdvisorPanel from "./AdvisorPanel";
 
 function ProbeCard({
   probe,
@@ -10,25 +11,27 @@ function ProbeCard({
   onMeatChange,
   meatTypes = [],
   sessionId,
+  onApplyPitTemp,
 }) {
-  // Local, form-controlled state (start from probe values)
-  const [minAlert, setMinAlert] = useState(probe.minAlert ?? "");
-  const [maxAlert, setMaxAlert] = useState(probe.maxAlert ?? "");
+  const [minAlert,     setMinAlert]     = useState(probe.minAlert     ?? "");
+  const [maxAlert,     setMaxAlert]     = useState(probe.maxAlert     ?? "");
   const [mobileNumber, setMobileNumber] = useState(probe.mobileNumber ?? "");
-  const [itemType, setItemType] = useState(probe.itemType ?? "");
-  const [itemWeight, setItemWeight] = useState(probe.itemWeight ?? "");
-  const [advisorBusy, setAdvisorBusy] = useState(false);
+  const [itemType,     setItemType]     = useState(probe.itemType     ?? "");
+  const [itemWeight,   setItemWeight]   = useState(probe.itemWeight   ?? "");
+  const [advisorBusy,  setAdvisorBusy]  = useState(false);
+  const [advice,       setAdvice]       = useState(null);
+  const [adviceCached, setAdviceCached] = useState(false);
 
-  // Only re-sync when the *probe itself* changes to avoid clobbering user typing
+  // Only re-sync when the probe itself changes (avoid clobbering user typing)
   useEffect(() => {
-    setMinAlert(probe.minAlert ?? "");
-    setMaxAlert(probe.maxAlert ?? "");
+    setMinAlert(probe.minAlert     ?? "");
+    setMaxAlert(probe.maxAlert     ?? "");
     setMobileNumber(probe.mobileNumber ?? "");
-    setItemType(probe.itemType ?? "");
+    setItemType(probe.itemType     ?? "");
     setItemWeight(probe.itemWeight ?? "");
-  }, [probe.id]); // important: don't depend on individual values
+    setAdvice(null);
+  }, [probe.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Inform parent so it can persist (parent/App owns network calls)
   const saveItemDetails = useCallback(() => {
     onMeatChange?.(probe.id, itemType, itemWeight);
   }, [onMeatChange, probe.id, itemType, itemWeight]);
@@ -45,29 +48,23 @@ function ProbeCard({
   }, [onClearAlert, probe.id]);
 
   const handleAdvisor = useCallback(async () => {
-    if (!sessionId) {
-      alert("No active session yet.");
-      return;
-    }
+    if (!sessionId) return;
     setAdvisorBusy(true);
     try {
-      const res = await postAdvisor({
-        session_id: sessionId,
-        probe_id: probe.id,
-      });
-      if (!res || res.error) {
-        throw new Error(res?.error || "Advisor returned an error");
-      }
-      const model = res.model ? ` (${res.model})` : "";
-      alert(`AI Guidance${model}:\n\n${res.advice ?? "No advice returned."}`);
+      const res = await postAdvisor({ session_id: sessionId, probe_id: probe.id });
+      if (!res || res.error) throw new Error(res?.error || "Advisor error");
+      setAdvice(res.advice);
+      setAdviceCached(res.cached ?? false);
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Advisor error:", err);
-      alert("Unable to get AI guidance right now.");
+      console.error("Advisor error:", err); // eslint-disable-line no-console
+      setAdvice({ notes: "Unable to get AI guidance right now. Please try again." });
+      setAdviceCached(false);
     } finally {
       setAdvisorBusy(false);
     }
   }, [sessionId, probe.id]);
+
+  const hasItem = Boolean(itemType);
 
   return (
     <div className="probe-card" style={{ marginLeft: "20px" }}>
@@ -156,10 +153,20 @@ function ProbeCard({
         {(minAlert || maxAlert || mobileNumber) && (
           <button onClick={clearAlerts}>Clear Alerts</button>
         )}
-        <button onClick={handleAdvisor} disabled={advisorBusy}>
-          {advisorBusy ? "Getting AI…" : "Use AI Guidance"}
-        </button>
+        {hasItem && (
+          <button onClick={handleAdvisor} disabled={advisorBusy}>
+            {advisorBusy ? "Getting AI..." : "AI Guidance"}
+          </button>
+        )}
       </div>
+
+      {advice && (
+        <AdvisorPanel
+          advice={advice}
+          cached={adviceCached}
+          onApplyPitTemp={onApplyPitTemp}
+        />
+      )}
     </div>
   );
 }

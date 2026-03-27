@@ -5,7 +5,8 @@ import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
 import ProbeChart from "./components/ProbeCard/ProbeChart";
-import { fetchLatestSession, fetchSensors, fetchItemTypes } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession } from "./api";
+import SessionSelector from "./components/SessionSelector/SessionSelector";
 import axios from "axios";
 
 const POLL_MS = 15000; // 15s UI refresh
@@ -16,10 +17,14 @@ const PROBE_ASSIGNMENT_URL =
 
 export default function App() {
   // ---- Data ----
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = useState("");         // latest/live session
+  const [selectedSessionId, setSelectedSessionId] = useState(""); // what we are viewing
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
   const [sensorData, setSensorData] = useState([]);
-  const [itemTypes, setItemTypes] = useState([]); // formerly “meat types”
+  const [itemTypes, setItemTypes] = useState([]); // formerly "meat types"
   const [alerts, setAlerts] = useState([]);
+  const [targetPitTemp, setTargetPitTemp] = useState("");
 
   // ---- UI state ----
   const [loading, setLoading] = useState(false);
@@ -91,6 +96,22 @@ export default function App() {
     return String(res.session_id || "");
   }, []);
 
+  // Load the session list once on mount
+  useEffect(() => {
+    let mounted = true;
+    fetchSessions(50)
+      .then((list) => {
+        if (!mounted) return;
+        setSessions(Array.isArray(list) ? list : []);
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { if (mounted) setSessionsLoading(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  useEffect(() => { selectedSessionIdRef.current = selectedSessionId; }, [selectedSessionId]);
+
   const refreshData = useCallback(async () => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
@@ -101,8 +122,11 @@ export default function App() {
       const sid = await resolveSessionId();
       if (!sid) throw new Error("No session_id returned");
       setSessionId(sid);
+      // Only follow the live session if user hasn't picked a historical one
+      setSelectedSessionId((prev) => prev || sid);
 
-      const data = await fetchSensors(sid, 100);
+      const viewSid = selectedSessionIdRef.current || sid;
+      const data = await fetchSensors(viewSid, 100);
       // Sort newest-first by timestamp (ISO-ish string compare is OK for your format)
       const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) => {
         const ta = String(a?.timestamp ?? "");
@@ -146,15 +170,31 @@ export default function App() {
     };
   }, []);
 
-  // Poll sensors
+  // Poll sensors — pause polling when viewing a historical session
+  const isLive = !selectedSessionId || selectedSessionId === sessionId;
   useEffect(() => {
     refreshData(); // immediate
     if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(refreshData, POLL_MS);
+    if (isLive) {
+      timerRef.current = setInterval(refreshData, POLL_MS);
+    }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [refreshData]);
+  }, [refreshData, isLive]);
+
+  const handleSessionSelect = useCallback((sid) => {
+    setSelectedSessionId(sid);
+  }, []);
+
+  const handleApplyPitTemp = useCallback(async (temp) => {
+    setTargetPitTemp(String(temp));
+    try {
+      await updateSession({ session_id: sessionId, target_pit_temp_f: temp });
+    } catch (e) {
+      console.error("Failed to save target pit temp:", e); // eslint-disable-line no-console
+    }
+  }, [sessionId]);
 
   // Alerts
   const onClearAlert = useCallback((probeId) => {
@@ -203,10 +243,25 @@ export default function App() {
     <div className="app-container">
       <header>
         <h1>SmokeGPT – AI Powered Smokehouse</h1>
-        <div className="text-sm text-gray-600">
-          Session: <code>{sessionId || "—"}</code>
-          {loading && <span className="ml-2">Loading…</span>}
-          {error && <span className="ml-2 text-red-600">{error}</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <SessionSelector
+            sessions={sessions}
+            currentId={sessionId}
+            selectedId={selectedSessionId || sessionId}
+            onSelect={handleSessionSelect}
+            loading={sessionsLoading}
+          />
+          {!isLive && (
+            <button
+              className="text-sm"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #4caf50", background: "transparent", color: "#4caf50", cursor: "pointer" }}
+              onClick={() => setSelectedSessionId(sessionId)}
+            >
+              Back to Live
+            </button>
+          )}
+          {loading && <span className="text-sm" style={{ color: "#888" }}>Loading…</span>}
+          {error && <span className="text-sm" style={{ color: "#f44336" }}>{error}</span>}
         </div>
       </header>
 
@@ -225,6 +280,25 @@ export default function App() {
               <Row label="Bottom" value={valOrNA(smokehouseStatus.bottom)} />
               <Row label="Humidity (%)" value={valOrNA(smokehouseStatus.humidity)} />
               <Row label="Smoke (ppm)" value={valOrNA(smokehouseStatus.smokePPM)} />
+              <div className="input-group" style={{ marginTop: 10 }}>
+                <label>Target pit temp (°F):</label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="50"
+                  max="500"
+                  value={targetPitTemp}
+                  onChange={(e) => setTargetPitTemp(e.target.value)}
+                  onBlur={() => {
+                    if (targetPitTemp && sessionId) {
+                      updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTemp) })
+                        .catch(() => {});
+                    }
+                  }}
+                  placeholder="e.g. 225"
+                  style={{ width: 80, padding: 4, marginLeft: 8 }}
+                />
+              </div>
             </div>
 
             <div className="smokehouse-chart-container" style={{ flex: 1 }}>
@@ -254,9 +328,8 @@ export default function App() {
                 onClearAlert={onClearAlert}
                 onMeatChange={(id, t, w) => handleItemChange(id, t, w)}
                 meatTypes={itemTypes || []}
-                // App persists assignments itself to PROBE_ASSIGNMENT_URL;
-                // ProbeCard just calls onMeatChange.
-                sessionId={sessionId}
+                sessionId={selectedSessionId || sessionId}
+                onApplyPitTemp={handleApplyPitTemp}
               />
               <div className="probe-chart-container" style={{ flex: 1 }}>
                 <ProbeChart probe={probe} data={sensorData} />

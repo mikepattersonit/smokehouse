@@ -39,6 +39,11 @@ export async function fetchLatestSession() {
   return jsonFetch(`${API_BASE}/sessions/latest`);
 }
 
+/** GET /sessions?limit=N -> [{ session_id, status, started_at, ... }, ...] newest-first */
+export async function fetchSessions(limit = 50) {
+  return jsonFetch(`${API_BASE}/sessions?limit=${limit}`);
+}
+
 // ---------- Sensors ----------
 /** GET /sensors?session_id=...&limit=... -> array of samples (newest-first expected by UI) */
 export async function fetchSensors(sessionId, limit = 50) {
@@ -83,6 +88,19 @@ export async function postAdvisor(payload) {
     throw new Error("postAdvisor: {session_id, probe_id} required");
   }
   return jsonFetch(`${API_BASE}/advisor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// ---------- Session settings ----------
+/**
+ * POST /sessions/update
+ * payload: { session_id, target_pit_temp_f }
+ */
+export async function updateSession(payload) {
+  return jsonFetch(`${API_BASE}/sessions/update`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
