@@ -33,16 +33,29 @@ body {
 /* ── HEADER ── */
 .app-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
   padding: 0 20px;
-  height: 52px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 100;
+}
+
+.header-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 48px;
+}
+
+.header-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  min-width: 0;
 }
 
 .header-left {
@@ -266,7 +279,8 @@ body {
 
 @media (max-width: 580px) {
   .probes-grid { grid-template-columns: 1fr; }
-  .app-header { height: auto; padding: 8px 14px; flex-wrap: wrap; }
+  .app-header { padding: 0 14px; }
+  .header-top-row { height: 44px; }
   .status-strip { flex-wrap: wrap; }
   .stat-cell { flex: 0 0 33.33%; border-bottom: 1px solid var(--border); }
   .main-chart-section { padding: 12px 14px; }
