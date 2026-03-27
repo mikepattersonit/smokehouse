@@ -1,73 +1,71 @@
 import boto3
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
-# Initialize DynamoDB client
-dynamodb = boto3.resource('dynamodb', region_name='us-east-2')
+dynamodb = boto3.resource('dynamodb')
+sessions_table = dynamodb.Table('sessions')
 
-# Table names
-SENSOR_TABLE = 'sensor_data'
-SESSIONS_TABLE = 'sessions'
-
-# Constants
 SESSION_TIMEOUT = 45 * 60  # 45 minutes in seconds
 
-# DynamoDB table references
-sensor_table = dynamodb.Table(SENSOR_TABLE)
-sessions_table = dynamodb.Table(SESSIONS_TABLE)
+
+def parse_last_seen(ts):
+    """Convert last_seen string to epoch int. Handles multiple formats."""
+    if ts is None:
+        return None
+    try:
+        s = str(ts)
+        # "20251225T184651Z" (firmware format)
+        if len(s) == 16 and 'T' in s and s.endswith('Z'):
+            dt = datetime.strptime(s, "%Y%m%dT%H%M%SZ")
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        # ISO 8601 "2025-12-25T18:46:51Z"
+        if 'T' in s and '-' in s:
+            dt = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        # Plain epoch int string
+        return int(float(s))
+    except Exception:
+        return None
+
 
 def lambda_handler(event, context):
     now = int(time.time())
-    
-    try:
-        # Step 1: Scan the sensor data table to get recent session IDs
-        response = sensor_table.scan(
-            ProjectionExpression='session_id, timestamp'
-        )
-        items = response.get('Items', [])
-        
-        # Create a dictionary of latest timestamps for each session
-        sessions = {}
-        for item in items:
-            session_id = item.get('session_id')
-            timestamp = item.get('timestamp')
-            if session_id not in sessions or timestamp > sessions[session_id]:
-                sessions[session_id] = timestamp
-        
-        # Step 2: Update the sessions table
-        for session_id, latest_timestamp in sessions.items():
-            # Get existing session details from sessions table
-            response = sessions_table.get_item(
-                Key={'SessionID': session_id}
-            )
-            session_item = response.get('Item')
+    ended = []
+    errors = []
 
-            # If the session does not exist, create it
-            if not session_item:
-                sessions_table.put_item(
-                    Item={
-                        'SessionID': session_id,
-                        'StartTime': datetime.utcfromtimestamp(latest_timestamp).isoformat(),
-                        'Status': 'active',
-                    }
+    # Scan sessions table for active sessions only
+    resp = sessions_table.scan(
+        FilterExpression=boto3.dynamodb.conditions.Attr('status').eq('active'),
+        ProjectionExpression='session_id, last_seen',
+    )
+    active_sessions = resp.get('Items', [])
+
+    for session in active_sessions:
+        session_id = session.get('session_id')
+        last_seen = session.get('last_seen')
+        last_epoch = parse_last_seen(last_seen)
+
+        if last_epoch is None:
+            print(f"Could not parse last_seen for {session_id}: {last_seen!r}")
+            continue
+
+        age = now - last_epoch
+        if age > SESSION_TIMEOUT:
+            try:
+                sessions_table.update_item(
+                    Key={'session_id': session_id},
+                    UpdateExpression='SET #s = :ended, end_time = :et',
+                    ExpressionAttributeNames={'#s': 'status'},
+                    ExpressionAttributeValues={
+                        ':ended': 'ended',
+                        ':et': datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    },
                 )
-                print(f"New session started: {session_id}")
+                ended.append(session_id)
+                print(f"Ended session {session_id} (last seen {age // 60}m ago)")
+            except Exception as e:
+                errors.append(str(e))
+                print(f"Error ending session {session_id}: {e}")
 
-            # If the session exists and is still active, check if it needs to be ended
-            elif session_item['Status'] == 'active':
-                if now - int(latest_timestamp) > SESSION_TIMEOUT:
-                    # End the session
-                    sessions_table.update_item(
-                        Key={'SessionID': session_id},
-                        UpdateExpression='SET #s = :ended, EndTime = :end_time',
-                        ExpressionAttributeNames={'#s': 'Status'},
-                        ExpressionAttributeValues={
-                            ':ended': 'ended',
-                            ':end_time': datetime.utcfromtimestamp(now).isoformat()
-                        }
-                    )
-                    print(f"Session ended: {session_id}")
-
-    except Exception as e:
-        print(f"Error managing sessions: {str(e)}")
-
+    print(f"Done — ended {len(ended)} session(s), {len(errors)} error(s)")
+    return {'ended': ended, 'errors': errors}
