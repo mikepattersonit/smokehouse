@@ -39,6 +39,11 @@ export async function fetchLatestSession() {
   return jsonFetch(`${API_BASE}/sessions/latest`);
 }
 
+/** GET /sessions?limit=N -> [{ session_id, status, started_at, ... }, ...] newest-first */
+export async function fetchSessions(limit = 50) {
+  return jsonFetch(`${API_BASE}/sessions?limit=${limit}`);
+}
+
 // ---------- Sensors ----------
 /** GET /sensors?session_id=...&limit=... -> array of samples (newest-first expected by UI) */
 export async function fetchSensors(sessionId, limit = 50) {
