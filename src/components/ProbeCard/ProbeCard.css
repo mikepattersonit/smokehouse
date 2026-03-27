@@ -1,74 +1,235 @@
 /* ProbeCard.css */
 
-/* Chart Container */
-.chart-container {
-  position: relative;
-  margin: 20px auto;
-  padding: 20px;
-  background-color: #1e1e1e;
-  border-radius: 10px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
-}
-
-/* Chart Titles */
-.chart-title {
-  color: #f0f0f0;
-  text-align: center;
-  font-size: 1.5em;
-  margin-bottom: 10px;
-}
-
-/* Tooltip Styling */
-.tooltip {
-  background-color: #333;
-  color: #fff;
-  border-radius: 5px;
-  padding: 5px 10px;
-  font-size: 0.9em;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-/* Canvas Styling */
-canvas {
-  max-width: 50%;
-  height: auto;
-  border-radius: 8px;
-}
-
-/* Legend Styling */
-.legend {
+.probe-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-top: 15px;
+  flex-direction: column;
+  transition: border-color 0.2s;
 }
 
-.legend-item {
+.probe-card--active {
+  border-color: var(--ember-dim);
+}
+
+/* Header */
+.probe-card__header {
   display: flex;
   align-items: center;
-  margin-right: 15px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 6px;
 }
 
-.legend-color {
-  width: 15px;
-  height: 15px;
-  margin-right: 8px;
-  border-radius: 50%;
-  display: inline-block;
+.probe-card__name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
-.legend-label {
-  color: #e0e0e0;
-  font-size: 0.9em;
+.probe-card__tag {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
 }
 
-/* Responsive Design */
-@media (max-width: 768px) {
-  .chart-title {
-      font-size: 1.2em;
-  }
+.probe-card__tag--assigned {
+  background: var(--ember-dim);
+  color: var(--ember);
+}
 
-  .tooltip {
-      font-size: 0.8em;
-  }
+.probe-card__tag--empty {
+  background: var(--surface2);
+  color: var(--text3);
+}
+
+/* Temperature */
+.probe-card__temp-block {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 2px 14px 6px;
+}
+
+.probe-card__temp {
+  font-family: var(--mono);
+  font-size: 2.8rem;
+  font-weight: 600;
+  color: var(--ember);
+  line-height: 1;
+}
+
+.probe-card__temp--na {
+  color: var(--text3);
+  font-size: 2rem;
+}
+
+.probe-card__temp-unit {
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: var(--text3);
+}
+
+/* Meta */
+.probe-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 8px;
+  font-size: 0.78rem;
+  color: var(--text2);
+}
+
+.probe-card__meta strong { color: var(--text); }
+.probe-card__meta-sep   { color: var(--text3); }
+
+/* Mini sparkline */
+.probe-card__chart {
+  height: 68px;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* Action buttons */
+.probe-card__actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.probe-btn {
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: var(--sans);
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.probe-btn:hover    { opacity: 0.82; }
+.probe-btn:disabled { opacity: 0.4; cursor: default; }
+
+.probe-btn--ai {
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid #1a4d1a;
+}
+
+.probe-btn--config {
+  background: var(--surface2);
+  color: var(--text2);
+  border: 1px solid var(--border2);
+}
+
+.probe-btn--save {
+  background: var(--ember);
+  color: #fff;
+  border: none;
+}
+
+.probe-btn--clear {
+  background: var(--surface2);
+  color: var(--text3);
+  border: 1px solid var(--border2);
+}
+
+.probe-btn--assign {
+  background: var(--surface2);
+  color: var(--text2);
+  border: 1px dashed var(--border2);
+}
+
+/* Config panel */
+.probe-card__config {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-row label {
+  min-width: 64px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.config-row input,
+.config-row select {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.82rem;
+  padding: 5px 8px;
+  font-family: var(--sans);
+  outline: none;
+  min-width: 0;
+}
+
+.config-row input:focus,
+.config-row select:focus { border-color: var(--ember); }
+
+.config-alert-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.config-alert-range input { flex: 1; min-width: 0; }
+
+.config-alert-range span {
+  color: var(--text3);
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+
+.config-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* Empty state */
+.probe-card__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 14px 18px;
+}
+
+.probe-card__empty-text {
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 1.5;
+  color: var(--text3);
 }
