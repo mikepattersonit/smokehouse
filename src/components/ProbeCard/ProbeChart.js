@@ -9,7 +9,7 @@ function sanitize(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export default function ProbeChart({ probe, data = [] }) {
+export default function ProbeChart({ probe, data = [], isColdSmoke = false }) {
   const { labels, values } = useMemo(() => {
     // data is newest-first — reverse so time runs left→right
     const rows = [...data].reverse();
@@ -26,7 +26,7 @@ export default function ProbeChart({ probe, data = [] }) {
     labels,
     datasets: [{
       data: values,
-      borderColor: "#f97316",
+      borderColor: isColdSmoke ? "#60a5fa" : "#f97316",
       borderWidth: 1.5,
       pointRadius: 0,
       tension: 0.3,
@@ -36,8 +36,13 @@ export default function ProbeChart({ probe, data = [] }) {
         const { ctx: c, chartArea } = chart;
         if (!chartArea) return "transparent";
         const grad = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        grad.addColorStop(0, "rgba(249,115,22,0.25)");
-        grad.addColorStop(1, "rgba(249,115,22,0)");
+        if (isColdSmoke) {
+          grad.addColorStop(0, "rgba(96,165,250,0.25)");
+          grad.addColorStop(1, "rgba(96,165,250,0)");
+        } else {
+          grad.addColorStop(0, "rgba(249,115,22,0.25)");
+          grad.addColorStop(1, "rgba(249,115,22,0)");
+        }
         return grad;
       },
     }],

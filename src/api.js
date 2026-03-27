@@ -72,8 +72,11 @@ export async function fetchItemTypes() {
 function normalizeItemTypes(list) {
   if (!Array.isArray(list)) return [];
   return list.map((x) => ({
-    name: x.name ?? String(x?.Name ?? ""),
-    description: x.description ?? String(x?.Description ?? ""),
+    name:                   x.name        ?? String(x?.Name ?? ""),
+    description:            x.description ?? String(x?.Description ?? ""),
+    smoke_type:             x.smoke_type  ?? "hot",
+    target_internal_temp_f: x.target_internal_temp_f ?? null,
+    max_safe_temp_f:        x.max_safe_temp_f        ?? null,
   }));
 }
 
