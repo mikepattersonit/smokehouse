@@ -2,6 +2,7 @@
 import React, { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import "chart.js/auto";
+import { toDisplay, unitLabel } from "../../utils/temperature";
 
 function parseTimestamp(ts, sessionId) {
   if (!ts) return null;
@@ -39,7 +40,7 @@ function sanitize(v) {
   return typeof v === "number" ? v : Number.isFinite(Number(v)) ? Number(v) : null;
 }
 
-export default function Chart({ data = [], sessionId }) {
+export default function Chart({ data = [], sessionId, unit = "F" }) {
   const { labels, datasets } = useMemo(() => {
     const rows = data.map((row, idx) => ({
       ...row,
@@ -65,7 +66,10 @@ export default function Chart({ data = [], sessionId }) {
 
     const datasets = series.map(({ key, label, color }) => ({
       label,
-      data: rows.map((r) => sanitize(r[key])),
+      data: rows.map((r) => {
+        const v = sanitize(r[key]);
+        return v != null ? toDisplay(v, unit) : null;
+      }),
       borderColor: color,
       borderWidth: 1.5,
       pointRadius: 0,
@@ -74,7 +78,9 @@ export default function Chart({ data = [], sessionId }) {
     }));
 
     return { labels, datasets };
-  }, [data, sessionId]);
+  }, [data, sessionId, unit]);
+
+  const ul = unitLabel(unit);
 
   const options = {
     responsive: true,
@@ -84,7 +90,7 @@ export default function Chart({ data = [], sessionId }) {
       legend: { display: false },
       tooltip: {
         callbacks: {
-          label: (ctx) => `${ctx.dataset.label}: ${ctx.raw ?? "—"}°F`,
+          label: (ctx) => `${ctx.dataset.label}: ${ctx.raw ?? "—"}${ul}`,
         },
       },
     },
