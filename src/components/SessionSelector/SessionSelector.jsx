@@ -12,7 +12,7 @@ import './SessionSelector.css';
  *   onSelect     {func}    called with session_id string when user picks one
  *   loading      {bool}    show loading state while sessions are fetching
  */
-export default function SessionSelector({ sessions, currentId, selectedId, onSelect, loading }) {
+export default function SessionSelector({ sessions, currentId, selectedId, onSelect, loading, sessionActive }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -27,7 +27,7 @@ export default function SessionSelector({ sessions, currentId, selectedId, onSel
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const isLive = selectedId === currentId;
+  const isLive = selectedId === currentId && sessionActive;
   const label = loading
     ? 'Loading sessions…'
     : isLive
@@ -66,10 +66,10 @@ export default function SessionSelector({ sessions, currentId, selectedId, onSel
                 <span className="session-selector__item-label">
                   {fmtSessionId(s.session_id)}
                 </span>
-                {isCurrent && (
+                {isCurrent && sessionActive && (
                   <span className="session-selector__badge session-selector__badge--live">LIVE</span>
                 )}
-                {!isCurrent && s.status && (
+                {(!isCurrent || !sessionActive) && s.status && (
                   <span className="session-selector__badge">{s.status}</span>
                 )}
               </li>

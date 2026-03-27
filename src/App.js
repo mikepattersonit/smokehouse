@@ -256,6 +256,7 @@ export default function App() {
             selectedId={selectedSessionId || sessionId}
             onSelect={handleSessionSelect}
             loading={sessionsLoading}
+            sessionActive={sessionActive}
           />
           {!isLive && (
             <button className="back-to-live-btn" onClick={() => setSelectedSessionId(sessionId)}>
