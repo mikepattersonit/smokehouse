@@ -9,7 +9,7 @@
     "eject": "react-scripts eject"
   },
   "dependencies": {
-    "aws-amplify": "^6.10.0",
+    "aws-amplify": "^6.15.7",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.7.8",
     "chart.js": "^4.4.6",
