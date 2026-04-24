@@ -45,9 +45,9 @@ def lambda_handler(event, context):
                 # Iterate through the assigned probes and compare values
                 for assignment in assignments:
                     probe_id = assignment['probe_id']
-                    min_alert = assignment.get('minAlert')
-                    max_alert = assignment.get('maxAlert')
-                    mobile_number = assignment.get('mobileNumber')
+                    min_alert = assignment.get('min_alert')
+                    max_alert = assignment.get('max_alert')
+                    mobile_number = assignment.get('mobile_number')
 
                     # Extract the current probe reading from the sensor data
                     probe_value = probe_values.get(probe_id)
@@ -62,13 +62,27 @@ def lambda_handler(event, context):
                         alert_message = f'Alert for Probe {probe_id}: Temperature {probe_value} exceeds the maximum threshold of {max_alert}.'
 
                     # Send alert via SNS if needed
-                    if alert_message and mobile_number:
+                    if alert_message:
                         try:
-                            sns_client.publish(
-                                PhoneNumber=mobile_number,
-                                Message=alert_message,
-                                TopicArn=SNS_TOPIC_ARN
-                            )
+                            if mobile_number:
+                                sns_client.publish(
+                                    PhoneNumber=mobile_number,
+                                    Message=alert_message,
+                                    MessageAttributes={
+                                        'AWS.SNS.SMS.SMSType': {
+                                            'DataType': 'String',
+                                            'StringValue': 'Transactional'
+                                        }
+                                    }
+                                )
+                            elif SNS_TOPIC_ARN:
+                                sns_client.publish(
+                                    TopicArn=SNS_TOPIC_ARN,
+                                    Message=alert_message
+                                )
+                            else:
+                                print(f'No mobile number or topic ARN configured for probe {probe_id}, skipping alert.')
+                                continue
                             print(f'Alert sent for probe {probe_id}: {alert_message}')
                         except Exception as e:
                             print(f'Error sending alert for probe {probe_id}: {str(e)}')

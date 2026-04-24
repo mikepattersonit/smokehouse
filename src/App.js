@@ -4,79 +4,62 @@ import "./App.css";
 import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
-import ProbeChart from "./components/ProbeCard/ProbeChart";
-import { fetchLatestSession, fetchSensors, fetchItemTypes } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments } from "./api";
+import SessionSelector from "./components/SessionSelector/SessionSelector";
+import { sessionIdToDate } from "./components/SessionSelector/formatDateTime";
+import { toDisplay, fromDisplay, unitLabel } from "./utils/temperature";
 import axios from "axios";
 
-const POLL_MS = 15000; // 15s UI refresh
+const POLL_MS = 15000;
 
-// Full URL to your API route that saves probe assignments
 const PROBE_ASSIGNMENT_URL =
   "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
-export default function App() {
-  // ---- Data ----
-  const [sessionId, setSessionId] = useState("");
-  const [sensorData, setSensorData] = useState([]);
-  const [itemTypes, setItemTypes] = useState([]); // formerly “meat types”
-  const [alerts, setAlerts] = useState([]);
+function fmtElapsed(ms) {
+  if (ms == null || ms < 0) return null;
+  const totalMin = Math.floor(ms / 60000);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
 
-  // ---- UI state ----
+export default function App() {
+  const [sessionId, setSessionId] = useState("");
+  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [sessions, setSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sensorData, setSensorData] = useState([]);
+  const [itemTypes, setItemTypes] = useState([]);
+  const [alerts, setAlerts] = useState([]);
+  const [targetPitTempF, setTargetPitTempF] = useState(""); // always stored in °F
+  const [mobileNumber, setMobileNumber] = useState("");
+  const [unit, setUnit] = useState("F"); // 'F' | 'C'
+  const [sessionElapsed, setSessionElapsed] = useState(null);
+  const [sessionActive, setSessionActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const timerRef = useRef(null);
+  const clockRef = useRef(null);
   const inFlightRef = useRef(false);
+  const assignmentsLoadedForRef = useRef("");
 
-  // Probes (rename-able per session; temps hydrated from latest sample)
   const [probes, setProbes] = useState([
-    {
-      id: "probe1_temp",
-      name: "Probe 1",
-      minAlert: "",
-      maxAlert: "",
-      mobileNumber: "",
-      itemType: "",
-      itemWeight: "",
-      temperature: null,
-    },
-    {
-      id: "probe2_temp",
-      name: "Probe 2",
-      minAlert: "",
-      maxAlert: "",
-      mobileNumber: "",
-      itemType: "",
-      itemWeight: "",
-      temperature: null,
-    },
-    {
-      id: "probe3_temp",
-      name: "Probe 3",
-      minAlert: "",
-      maxAlert: "",
-      mobileNumber: "",
-      itemType: "",
-      itemWeight: "",
-      temperature: null,
-    },
+    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
+    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
+    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
   ]);
 
-  // Newest sample
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
 
-  // Derive smokehouse environment from newest sample
-  const smokehouseStatus = useMemo(() => {
-    return {
-      outside: pickNum(latest.outside_temp, latest.internal_temp),
-      top: pickNum(latest.top_temp),
-      middle: pickNum(latest.middle_temp),
-      bottom: pickNum(latest.bottom_temp),
-      humidity: pickNum(latest.humidity),
-      smokePPM: pickNum(latest.smoke_ppm),
-    };
-  }, [latest]);
+  const smokehouseStatus = useMemo(() => ({
+    outside:  pickNum(latest.outside_temp, latest.internal_temp),
+    top:      pickNum(latest.top_temp),
+    middle:   pickNum(latest.middle_temp),
+    bottom:   pickNum(latest.bottom_temp),
+    humidity: pickNum(latest.humidity),
+    smokePPM: pickNum(latest.smoke_ppm),
+  }), [latest]);
 
-  // ---------- helpers ----------
   function pickNum(...vals) {
     for (const v of vals) {
       if (v === undefined || v === null) continue;
@@ -86,32 +69,59 @@ export default function App() {
     return null;
   }
 
+  // isLive: viewing the latest session AND the smokehouse is actively sending data
+  const isLive = (!selectedSessionId || selectedSessionId === sessionId) && sessionActive;
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const startDate = sessionIdToDate(sessionId);
+    if (!startDate) return;
+
+    function tick() {
+      setSessionElapsed(Date.now() - startDate.getTime());
+    }
+    tick();
+    clockRef.current = setInterval(tick, 60000);
+    return () => clearInterval(clockRef.current);
+  }, [sessionId]);
+
   const resolveSessionId = useCallback(async () => {
     const res = await fetchLatestSession();
-    return String(res.session_id || "");
+    setSessionActive(res.status === "active");
+    return res;
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchSessions(50)
+      .then((list) => { if (mounted) setSessions(Array.isArray(list) ? list : []); })
+      .catch(() => {})
+      .finally(() => { if (mounted) setSessionsLoading(false); });
+    return () => { mounted = false; };
+  }, []);
+
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  useEffect(() => { selectedSessionIdRef.current = selectedSessionId; }, [selectedSessionId]);
 
   const refreshData = useCallback(async () => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     setLoading(true);
     setError("");
-
     try {
-      const sid = await resolveSessionId();
+      const session = await resolveSessionId();
+      const sid = String(session.session_id || "");
       if (!sid) throw new Error("No session_id returned");
       setSessionId(sid);
+      setSelectedSessionId((prev) => prev || sid);
 
-      const data = await fetchSensors(sid, 100);
-      // Sort newest-first by timestamp (ISO-ish string compare is OK for your format)
-      const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) => {
-        const ta = String(a?.timestamp ?? "");
-        const tb = String(b?.timestamp ?? "");
-        return tb.localeCompare(ta);
-      });
+      const viewSid = selectedSessionIdRef.current || sid;
+      const data = await fetchSensors(viewSid, 100);
+      const sorted = [...(Array.isArray(data) ? data : [])].sort((a, b) =>
+        String(b?.timestamp ?? "").localeCompare(String(a?.timestamp ?? ""))
+      );
       setSensorData(sorted);
 
-      // Hydrate current probe temps from latest sample (if present)
       const latestSample = sorted[0] || {};
       setProbes((prev) =>
         prev.map((p) => ({
@@ -122,166 +132,264 @@ export default function App() {
               : null,
         }))
       );
-    } catch (e) {
-      setError("Failed to load session/sensor data");
+
+      // Load session-level data and probe assignments once per session
+      if (assignmentsLoadedForRef.current !== sid) {
+        assignmentsLoadedForRef.current = sid;
+
+        // Restore target pit temp saved by the backend
+        if (session.target_pit_temp_f != null) {
+          setTargetPitTempF(String(session.target_pit_temp_f));
+        }
+
+        // Restore probe assignments (item type, weight, alert thresholds)
+        const assignments = await fetchProbeAssignments(sid);
+        if (assignments.length > 0) {
+          setProbes((prev) =>
+            prev.map((p) => {
+              const a = assignments.find((x) => x.probe_id === p.id);
+              if (!a) return p;
+              return {
+                ...p,
+                itemType:   a.item_type   ?? p.itemType,
+                itemWeight: a.item_weight ?? p.itemWeight,
+                minAlert:   a.min_alert  != null ? String(a.min_alert)  : p.minAlert,
+                maxAlert:   a.max_alert  != null ? String(a.max_alert)  : p.maxAlert,
+              };
+            })
+          );
+        }
+      }
+    } catch {
+      setError("Failed to load data");
     } finally {
       setLoading(false);
       inFlightRef.current = false;
     }
   }, [resolveSessionId]);
 
-  // Load item types (once)
   useEffect(() => {
     let mounted = true;
     fetchItemTypes()
-      .then((types) => {
-        if (!mounted) return;
-        setItemTypes(Array.isArray(types) ? types : []);
-      })
-      .catch(() => {
-        /* non-fatal */
-      });
-    return () => {
-      mounted = false;
-    };
+      .then((types) => { if (mounted) setItemTypes(Array.isArray(types) ? types : []); })
+      .catch(() => {});
+    return () => { mounted = false; };
   }, []);
 
-  // Poll sensors
   useEffect(() => {
-    refreshData(); // immediate
+    refreshData();
     if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(refreshData, POLL_MS);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    if (isLive) timerRef.current = setInterval(refreshData, POLL_MS);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [refreshData, isLive]);
+
+  const handleSessionSelect = useCallback((sid) => {
+    selectedSessionIdRef.current = sid;
+    setSelectedSessionId(sid);
+    assignmentsLoadedForRef.current = "";
+    refreshData();
   }, [refreshData]);
 
-  // Alerts
+  const handleApplyPitTemp = useCallback(async (tempF) => {
+    setTargetPitTempF(String(tempF));
+    try {
+      await updateSession({ session_id: sessionId, target_pit_temp_f: tempF });
+    } catch (e) {
+      console.error("Failed to save target pit temp:", e); // eslint-disable-line no-console
+    }
+  }, [sessionId]);
+
   const onClearAlert = useCallback((probeId) => {
     setAlerts((prev) => prev.filter((a) => a.probeId !== probeId));
   }, []);
 
-  const handleSetAlert = useCallback(
-    (id, min, max, mobileNumber) => {
-      // Snapshot the current name for the probe for display
-      const current = probes.find((p) => p.id === id);
-      const probeName = current?.name || id;
+  const handleSetAlert = useCallback((id, minF, maxF) => {
+    const current = probes.find((p) => p.id === id);
+    const probeName = current?.name || id;
+    setAlerts((prev) => [
+      ...prev,
+      { probeId: id, min: minF, max: maxF, probeName, active: true, mobileNumber },
+    ]);
+  }, [probes, mobileNumber]);
 
-      setAlerts((prev) => [
-        ...prev,
-        { probeId: id, min, max, probeName, active: true, mobileNumber },
-      ]);
-    },
-    [probes]
-  );
+  const handleItemChange = useCallback(async (id, itemType, itemWeight) => {
+    setProbes((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, itemType, itemWeight } : p))
+    );
+    try {
+      await axios.post(PROBE_ASSIGNMENT_URL, { probeId: id, itemType, itemWeight, sessionId });
+    } catch (e) {
+      console.error("Error saving probe assignment:", e?.message || e); // eslint-disable-line no-console
+    }
+  }, [sessionId]);
 
-  // Assign / update item on a probe (parent owns persistence)
-  const handleItemChange = useCallback(
-    async (id, itemType, itemWeight) => {
-      setProbes((prev) =>
-        prev.map((probe) =>
-          probe.id === id ? { ...probe, itemType, itemWeight } : probe
-        )
-      );
-      try {
-        await axios.post(PROBE_ASSIGNMENT_URL, {
-          probeId: id,
-          itemType,
-          itemWeight,
-          sessionId, // current session
-        });
-      } catch (e) {
-        // Non-fatal; log for debugging
-        // eslint-disable-next-line no-console
-        console.error("Error saving probe assignment:", e?.message || e);
-      }
-    },
-    [sessionId]
-  );
+  // Pit temp display value (convert F→display unit)
+  const pitTempDisplay = targetPitTempF !== ""
+    ? toDisplay(Number(targetPitTempF), unit) ?? ""
+    : "";
+
+  function tempClass(valF) {
+    if (valF === null) return "na";
+    if (valF >= 200) return "hot";
+    if (valF >= 150) return "warm";
+    return "";
+  }
+
+  function fmtStat(valF) {
+    if (valF === null || valF === undefined) return "—";
+    const v = toDisplay(valF, unit);
+    return v == null ? "—" : String(v);
+  }
+
+  const ul = unitLabel(unit);
 
   return (
-    <div className="app-container">
-      <header>
-        <h1>SmokeGPT – AI Powered Smokehouse</h1>
-        <div className="text-sm text-gray-600">
-          Session: <code>{sessionId || "—"}</code>
-          {loading && <span className="ml-2">Loading…</span>}
-          {error && <span className="ml-2 text-red-600">{error}</span>}
+    <div>
+      {/* HEADER */}
+      <header className="app-header">
+        <div className="header-top-row">
+          <div className="header-left">
+            <div className="app-logo">Smoke<span>GPT</span></div>
+            {isLive ? (
+              <div className="live-badge">
+                <div className="live-dot" />
+                Live
+                {sessionElapsed != null && (
+                  <span className="session-clock">{fmtElapsed(sessionElapsed)}</span>
+                )}
+              </div>
+            ) : (
+              <div className="historical-badge">Historical</div>
+            )}
+          </div>
+          <div className="header-right">
+            {loading && <span className="header-loading">Loading…</span>}
+            {error   && <span className="header-error">{error}</span>}
+            <button
+              className={`unit-toggle${unit === "C" ? " unit-toggle--active" : ""}`}
+              onClick={() => setUnit((u) => u === "F" ? "C" : "F")}
+            >
+              °{unit === "F" ? "C" : "F"}
+            </button>
+            <div className="mobile-field">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/>
+              </svg>
+              <input
+                type="tel"
+                placeholder="(555) 123-4567"
+                value={mobileNumber}
+                onChange={(e) => setMobileNumber(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="header-session-row">
+          <SessionSelector
+            sessions={sessions}
+            currentId={sessionId}
+            selectedId={selectedSessionId || sessionId}
+            onSelect={handleSessionSelect}
+            loading={sessionsLoading}
+            sessionActive={sessionActive}
+          />
+          {!isLive && (
+            <button className="back-to-live-btn" onClick={() => setSelectedSessionId(sessionId)}>
+              ← Live
+            </button>
+          )}
         </div>
       </header>
 
-      <section className="layout-container">
-        <div className="left-column">
-          {/* Environment status + chart */}
-          <div
-            className="smokehouse-status-container"
-            style={{ display: "flex", alignItems: "flex-start", gap: 16 }}
-          >
-            <div className="probe-card" style={{ minWidth: 220 }}>
-              <h3>Smokehouse Status</h3>
-              <Row label="Outside Temp" value={valOrNA(smokehouseStatus.outside)} />
-              <Row label="Top" value={valOrNA(smokehouseStatus.top)} />
-              <Row label="Middle" value={valOrNA(smokehouseStatus.middle)} />
-              <Row label="Bottom" value={valOrNA(smokehouseStatus.bottom)} />
-              <Row label="Humidity (%)" value={valOrNA(smokehouseStatus.humidity)} />
-              <Row label="Smoke (ppm)" value={valOrNA(smokehouseStatus.smokePPM)} />
-            </div>
-
-            <div className="smokehouse-chart-container" style={{ flex: 1 }}>
-              {sensorData.length > 0 ? (
-                <Chart data={sensorData} />
-              ) : (
-                <div className="text-sm text-gray-500">No samples yet.</div>
-              )}
-            </div>
+      {/* STATUS STRIP */}
+      <div className="status-strip">
+        {[
+          { label: "Outside", val: smokehouseStatus.outside },
+          { label: "Top",     val: smokehouseStatus.top },
+          { label: "Middle",  val: smokehouseStatus.middle },
+          { label: "Bottom",  val: smokehouseStatus.bottom },
+        ].map(({ label, val }) => (
+          <div className="stat-cell" key={label}>
+            <span className="stat-label">{label}</span>
+            <span className={`stat-value ${tempClass(val)}`}>{fmtStat(val)}</span>
+            <span className="stat-unit">{ul}</span>
           </div>
+        ))}
+        <div className="stat-cell">
+          <span className="stat-label">Humidity</span>
+          <span className={`stat-value ${smokehouseStatus.humidity == null ? "na" : ""}`}>
+            {smokehouseStatus.humidity != null ? Math.round(smokehouseStatus.humidity) : "—"}
+          </span>
+          <span className="stat-unit">%</span>
+        </div>
+        <div className="stat-cell">
+          <span className="stat-label">Smoke</span>
+          <span className={`stat-value ${smokehouseStatus.smokePPM == null ? "na" : ""}`}>
+            {smokehouseStatus.smokePPM != null ? Math.round(smokehouseStatus.smokePPM) : "—"}
+          </span>
+          <span className="stat-unit">ppm</span>
+        </div>
+      </div>
 
-          {/* Probes */}
+      {/* PIT TEMP */}
+      <div className="pit-temp-bar">
+        <span>Target pit temp:</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={unit === "C" ? "10" : "50"}
+          max={unit === "C" ? "260" : "500"}
+          value={pitTempDisplay}
+          onChange={(e) => {
+            const f = fromDisplay(e.target.value, unit);
+            setTargetPitTempF(f != null ? String(f) : "");
+          }}
+          onBlur={() => {
+            if (targetPitTempF && sessionId)
+              updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTempF) }).catch(() => {});
+          }}
+          placeholder={unit === "C" ? "e.g. 107" : "e.g. 225"}
+        />
+        <span style={{ color: "var(--text3)" }}>{ul}</span>
+      </div>
+
+      {/* MAIN CHART */}
+      <div className="main-chart-section">
+        <div className="section-label">Smokehouse Temperature History</div>
+        {sensorData.length > 0
+          ? <Chart data={sensorData} sessionId={selectedSessionId || sessionId} unit={unit} />
+          : <div style={{ color: "var(--text3)", fontSize: "0.85rem", padding: "20px 0" }}>No data yet.</div>
+        }
+        <div className="chart-legend">
+          <div className="legend-item"><div className="legend-dot" style={{ background: "#60a5fa" }} /> Top</div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: "#34d399" }} /> Middle</div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: "#f59e0b" }} /> Bottom</div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: "#9ca3af" }} /> Outside</div>
+        </div>
+      </div>
+
+      {/* PROBES */}
+      <div className="probes-section">
+        <div className="section-label">Probes</div>
+        <div className="probes-grid">
           {probes.map((probe) => (
-            <div
+            <ProbeCard
               key={probe.id}
-              className="probe-container"
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 12,
-                marginTop: 16,
-              }}
-            >
-              <ProbeCard
-                probe={probe}
-                onSetAlert={handleSetAlert}
-                onClearAlert={onClearAlert}
-                onMeatChange={(id, t, w) => handleItemChange(id, t, w)}
-                meatTypes={itemTypes || []}
-                // App persists assignments itself to PROBE_ASSIGNMENT_URL;
-                // ProbeCard just calls onMeatChange.
-                sessionId={sessionId}
-              />
-              <div className="probe-chart-container" style={{ flex: 1 }}>
-                <ProbeChart probe={probe} data={sensorData} />
-              </div>
-            </div>
+              probe={probe}
+              data={sensorData}
+              sessionId={selectedSessionId || sessionId}
+              itemTypes={itemTypes || []}
+              unit={unit}
+              onSetAlert={handleSetAlert}
+              onClearAlert={onClearAlert}
+              onItemChange={handleItemChange}
+              onApplyPitTemp={handleApplyPitTemp}
+            />
           ))}
         </div>
-      </section>
+      </div>
 
-      {/* Alerts */}
       {alerts.length > 0 && <Alerts alerts={alerts} onClearAlert={onClearAlert} />}
     </div>
   );
-}
-
-function Row({ label, value }) {
-  return (
-    <p>
-      {label}: {valOrNA(value)}
-    </p>
-  );
-}
-
-function valOrNA(v) {
-  if (v === undefined || v === null) return "N/A";
-  if (typeof v === "number" && v === -999) return "N/A";
-  return v;
 }

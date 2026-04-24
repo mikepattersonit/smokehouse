@@ -39,6 +39,11 @@ export async function fetchLatestSession() {
   return jsonFetch(`${API_BASE}/sessions/latest`);
 }
 
+/** GET /sessions?limit=N -> [{ session_id, status, started_at, ... }, ...] newest-first */
+export async function fetchSessions(limit = 50) {
+  return jsonFetch(`${API_BASE}/sessions?limit=${limit}`);
+}
+
 // ---------- Sensors ----------
 /** GET /sensors?session_id=...&limit=... -> array of samples (newest-first expected by UI) */
 export async function fetchSensors(sessionId, limit = 50) {
@@ -67,8 +72,11 @@ export async function fetchItemTypes() {
 function normalizeItemTypes(list) {
   if (!Array.isArray(list)) return [];
   return list.map((x) => ({
-    name: x.name ?? String(x?.Name ?? ""),
-    description: x.description ?? String(x?.Description ?? ""),
+    name:                   x.name        ?? String(x?.Name ?? ""),
+    description:            x.description ?? String(x?.Description ?? ""),
+    smoke_type:             x.smoke_type  ?? "hot",
+    target_internal_temp_f: x.target_internal_temp_f ?? null,
+    max_safe_temp_f:        x.max_safe_temp_f        ?? null,
   }));
 }
 
@@ -89,7 +97,31 @@ export async function postAdvisor(payload) {
   });
 }
 
+// ---------- Session settings ----------
+/**
+ * POST /sessions/update
+ * payload: { session_id, target_pit_temp_f }
+ */
+export async function updateSession(payload) {
+  return jsonFetch(`${API_BASE}/sessions/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 // ---------- Assignments ----------
+/** GET probe assignments for a session -> [{ probe_id, item_type, item_weight, min_alert, max_alert, mobile_number }, ...] */
+export async function fetchProbeAssignments(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const res = await jsonFetch(`${ASSIGN_URL}?session_id=${encodeURIComponent(sessionId)}`);
+    return Array.isArray(res?.items) ? res.items : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * POST assignment to ManageProbeAssignments
  * params: { sessionId, probeId, itemType, itemWeight, minAlert, maxAlert, mobileNumber }
