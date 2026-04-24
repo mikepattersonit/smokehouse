@@ -111,6 +111,17 @@ export async function updateSession(payload) {
 }
 
 // ---------- Assignments ----------
+/** GET probe assignments for a session -> [{ probe_id, item_type, item_weight, min_alert, max_alert, mobile_number }, ...] */
+export async function fetchProbeAssignments(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const res = await jsonFetch(`${ASSIGN_URL}?session_id=${encodeURIComponent(sessionId)}`);
+    return Array.isArray(res?.items) ? res.items : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * POST assignment to ManageProbeAssignments
  * params: { sessionId, probeId, itemType, itemWeight, minAlert, maxAlert, mobileNumber }

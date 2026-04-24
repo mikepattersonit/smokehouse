@@ -4,7 +4,7 @@ import "./App.css";
 import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
-import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments } from "./api";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
 import { sessionIdToDate } from "./components/SessionSelector/formatDateTime";
 import { toDisplay, fromDisplay, unitLabel } from "./utils/temperature";
@@ -41,6 +41,7 @@ export default function App() {
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const inFlightRef = useRef(false);
+  const assignmentsLoadedForRef = useRef("");
 
   const [probes, setProbes] = useState([
     { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
@@ -87,7 +88,7 @@ export default function App() {
   const resolveSessionId = useCallback(async () => {
     const res = await fetchLatestSession();
     setSessionActive(res.status === "active");
-    return String(res.session_id || "");
+    return res;
   }, []);
 
   useEffect(() => {
@@ -108,7 +109,8 @@ export default function App() {
     setLoading(true);
     setError("");
     try {
-      const sid = await resolveSessionId();
+      const session = await resolveSessionId();
+      const sid = String(session.session_id || "");
       if (!sid) throw new Error("No session_id returned");
       setSessionId(sid);
       setSelectedSessionId((prev) => prev || sid);
@@ -130,6 +132,34 @@ export default function App() {
               : null,
         }))
       );
+
+      // Load session-level data and probe assignments once per session
+      if (assignmentsLoadedForRef.current !== sid) {
+        assignmentsLoadedForRef.current = sid;
+
+        // Restore target pit temp saved by the backend
+        if (session.target_pit_temp_f != null) {
+          setTargetPitTempF(String(session.target_pit_temp_f));
+        }
+
+        // Restore probe assignments (item type, weight, alert thresholds)
+        const assignments = await fetchProbeAssignments(sid);
+        if (assignments.length > 0) {
+          setProbes((prev) =>
+            prev.map((p) => {
+              const a = assignments.find((x) => x.probe_id === p.id);
+              if (!a) return p;
+              return {
+                ...p,
+                itemType:   a.item_type   ?? p.itemType,
+                itemWeight: a.item_weight ?? p.itemWeight,
+                minAlert:   a.min_alert  != null ? String(a.min_alert)  : p.minAlert,
+                maxAlert:   a.max_alert  != null ? String(a.max_alert)  : p.maxAlert,
+              };
+            })
+          );
+        }
+      }
     } catch {
       setError("Failed to load data");
     } finally {
@@ -156,6 +186,7 @@ export default function App() {
   const handleSessionSelect = useCallback((sid) => {
     selectedSessionIdRef.current = sid;
     setSelectedSessionId(sid);
+    assignmentsLoadedForRef.current = "";
     refreshData();
   }, [refreshData]);
 
@@ -287,14 +318,14 @@ export default function App() {
         <div className="stat-cell">
           <span className="stat-label">Humidity</span>
           <span className={`stat-value ${smokehouseStatus.humidity == null ? "na" : ""}`}>
-            {smokehouseStatus.humidity != null ? smokehouseStatus.humidity : "—"}
+            {smokehouseStatus.humidity != null ? Math.round(smokehouseStatus.humidity) : "—"}
           </span>
           <span className="stat-unit">%</span>
         </div>
         <div className="stat-cell">
           <span className="stat-label">Smoke</span>
           <span className={`stat-value ${smokehouseStatus.smokePPM == null ? "na" : ""}`}>
-            {smokehouseStatus.smokePPM != null ? smokehouseStatus.smokePPM : "—"}
+            {smokehouseStatus.smokePPM != null ? Math.round(smokehouseStatus.smokePPM) : "—"}
           </span>
           <span className="stat-unit">ppm</span>
         </div>

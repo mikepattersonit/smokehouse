@@ -38,12 +38,22 @@ def parse_ts_to_epoch(ts):
     try:
         if isinstance(ts, (int, float, Decimal)):
             return int(ts)
+        from datetime import datetime, timezone
         s = str(ts)
-        if len(s) == 6 and s.isdigit():  # HHMMSS (same-day heuristic)
+        # Firmware format: "20260424T124032Z"
+        if len(s) == 16 and 'T' in s and s.endswith('Z'):
+            dt = datetime.strptime(s, "%Y%m%dT%H%M%SZ")
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        # ISO 8601: "2026-04-24T12:40:32Z"
+        if 'T' in s and '-' in s:
+            dt = datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        # HHMMSS same-day heuristic
+        if len(s) == 6 and s.isdigit():
             h, m, sec = int(s[0:2]), int(s[2:4]), int(s[4:6])
             now = time.localtime()
             return int(time.mktime((now.tm_year, now.tm_mon, now.tm_mday, h, m, sec, 0, 0, -1)))
-        return int(s)  # epoch-like string
+        return int(s)  # plain epoch string
     except Exception:
         return None
 
@@ -80,7 +90,7 @@ def response(status_code, body):
 def lambda_handler(event, context):
     # Latest session (scan for now; we’ll index later)
     resp = t_sessions.scan(
-        ProjectionExpression='session_id, started_at, created_at, #s',
+        ProjectionExpression='session_id, started_at, created_at, #s, target_pit_temp_f',
         ExpressionAttributeNames={'#s': 'status'}
     )
     latest = pick_latest(resp.get('Items', []))
@@ -102,6 +112,7 @@ def lambda_handler(event, context):
         'status': status,
         'last_sample_ts': last_ts,
         'age_secs': age_secs,
-        'gap_secs': gap_secs
+        'gap_secs': gap_secs,
+        'target_pit_temp_f': latest.get('target_pit_temp_f'),
     })
     return response(200, body)
