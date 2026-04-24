@@ -135,6 +135,7 @@ export async function saveProbeAssignment({
   minAlert = null,
   maxAlert = null,
   mobileNumber = null,
+  groupId = null,
 }) {
   if (!sessionId || !probeId) {
     throw new Error("saveProbeAssignment: {sessionId, probeId} required");
@@ -147,6 +148,7 @@ export async function saveProbeAssignment({
     minAlert: toNullableNumber(minAlert),
     maxAlert: toNullableNumber(maxAlert),
     mobileNumber: mobileNumber || null,
+    groupId: groupId || null,
   };
   return jsonFetch(ASSIGN_URL, {
     method: "POST",

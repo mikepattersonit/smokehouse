@@ -4,16 +4,12 @@ import "./App.css";
 import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
-import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments, saveProbeAssignment } from "./api";
+import GroupedProbeCard from "./components/ProbeCard/GroupedProbeCard";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
 import { sessionIdToDate } from "./components/SessionSelector/formatDateTime";
 import { toDisplay, fromDisplay, unitLabel } from "./utils/temperature";
-import axios from "axios";
-
 const POLL_MS = 15000;
-
-const PROBE_ASSIGNMENT_URL =
-  "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
 function fmtElapsed(ms) {
   if (ms == null || ms < 0) return null;
@@ -44,9 +40,9 @@ export default function App() {
   const assignmentsLoadedForRef = useRef("");
 
   const [probes, setProbes] = useState([
-    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
-    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
-    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null },
+    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
+    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
+    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
   ]);
 
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
@@ -142,7 +138,7 @@ export default function App() {
           setTargetPitTempF(String(session.target_pit_temp_f));
         }
 
-        // Restore probe assignments (item type, weight, alert thresholds)
+        // Restore probe assignments (item type, weight, alert thresholds, group)
         const assignments = await fetchProbeAssignments(sid);
         if (assignments.length > 0) {
           setProbes((prev) =>
@@ -155,6 +151,7 @@ export default function App() {
                 itemWeight: a.item_weight ?? p.itemWeight,
                 minAlert:   a.min_alert  != null ? String(a.min_alert)  : p.minAlert,
                 maxAlert:   a.max_alert  != null ? String(a.max_alert)  : p.maxAlert,
+                groupId:    a.group_id   ?? null,
               };
             })
           );
@@ -213,15 +210,70 @@ export default function App() {
   }, [probes, mobileNumber]);
 
   const handleItemChange = useCallback(async (id, itemType, itemWeight) => {
-    setProbes((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, itemType, itemWeight } : p))
-    );
+    setProbes((prev) => {
+      const probe = prev.find((p) => p.id === id);
+      const groupIds = probe?.groupId
+        ? prev.filter((p) => p.groupId === probe.groupId).map((p) => p.id)
+        : [id];
+      return prev.map((p) => groupIds.includes(p.id) ? { ...p, itemType, itemWeight } : p);
+    });
     try {
-      await axios.post(PROBE_ASSIGNMENT_URL, { probeId: id, itemType, itemWeight, sessionId });
+      // Save to all probes in the same group (shared item)
+      const probe = probes.find((p) => p.id === id);
+      const groupProbes = probe?.groupId
+        ? probes.filter((p) => p.groupId === probe.groupId)
+        : [probe];
+      await Promise.all(
+        groupProbes.map((p) =>
+          saveProbeAssignment({
+            sessionId, probeId: p.id, itemType, itemWeight,
+            minAlert: p.minAlert || null, maxAlert: p.maxAlert || null,
+            groupId: probe.groupId || null,
+          })
+        )
+      );
     } catch (e) {
       console.error("Error saving probe assignment:", e?.message || e); // eslint-disable-line no-console
     }
-  }, [sessionId]);
+  }, [probes, sessionId]);
+
+  const handleLinkProbe = useCallback(async (myId, partnerId) => {
+    const groupId = myId;
+    const myProbe = probes.find((p) => p.id === myId);
+    const partnerProbe = probes.find((p) => p.id === partnerId);
+    const sharedItemType = myProbe?.itemType || partnerProbe?.itemType || "";
+    const sharedItemWeight = myProbe?.itemWeight || partnerProbe?.itemWeight || "";
+
+    setProbes((prev) =>
+      prev.map((p) =>
+        p.id === myId || p.id === partnerId
+          ? { ...p, groupId, itemType: sharedItemType, itemWeight: sharedItemWeight }
+          : p
+      )
+    );
+    try {
+      await Promise.all([
+        saveProbeAssignment({ sessionId, probeId: myId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: myProbe?.minAlert || null, maxAlert: myProbe?.maxAlert || null, groupId }),
+        saveProbeAssignment({ sessionId, probeId: partnerId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: partnerProbe?.minAlert || null, maxAlert: partnerProbe?.maxAlert || null, groupId }),
+      ]);
+    } catch (e) {
+      console.error("Error linking probes:", e?.message || e); // eslint-disable-line no-console
+    }
+  }, [probes, sessionId]);
+
+  const handleUnlinkProbe = useCallback(async (groupId) => {
+    const groupProbes = probes.filter((p) => p.groupId === groupId);
+    setProbes((prev) => prev.map((p) => p.groupId === groupId ? { ...p, groupId: null } : p));
+    try {
+      await Promise.all(
+        groupProbes.map((p) =>
+          saveProbeAssignment({ sessionId, probeId: p.id, itemType: p.itemType, itemWeight: p.itemWeight, minAlert: p.minAlert || null, maxAlert: p.maxAlert || null, groupId: null })
+        )
+      );
+    } catch (e) {
+      console.error("Error unlinking probes:", e?.message || e); // eslint-disable-line no-console
+    }
+  }, [probes, sessionId]);
 
   // Pit temp display value (convert F→display unit)
   const pitTempDisplay = targetPitTempF !== ""
@@ -372,20 +424,56 @@ export default function App() {
       <div className="probes-section">
         <div className="section-label">Probes</div>
         <div className="probes-grid">
-          {probes.map((probe) => (
-            <ProbeCard
-              key={probe.id}
-              probe={probe}
-              data={sensorData}
-              sessionId={selectedSessionId || sessionId}
-              itemTypes={itemTypes || []}
-              unit={unit}
-              onSetAlert={handleSetAlert}
-              onClearAlert={onClearAlert}
-              onItemChange={handleItemChange}
-              onApplyPitTemp={handleApplyPitTemp}
-            />
-          ))}
+          {(() => {
+            const seen = new Set();
+            return probes.flatMap((probe) => {
+              if (seen.has(probe.id)) return [];
+              seen.add(probe.id);
+
+              if (probe.groupId) {
+                const partners = probes.filter(
+                  (p) => !seen.has(p.id) && p.groupId === probe.groupId
+                );
+                partners.forEach((p) => seen.add(p.id));
+                const group = [probe, ...partners];
+                return [(
+                  <GroupedProbeCard
+                    key={group.map((p) => p.id).join("+")}
+                    probes={group}
+                    data={sensorData}
+                    sessionId={selectedSessionId || sessionId}
+                    itemTypes={itemTypes || []}
+                    unit={unit}
+                    onSetAlert={handleSetAlert}
+                    onClearAlert={onClearAlert}
+                    onItemChange={handleItemChange}
+                    onUngroup={handleUnlinkProbe}
+                    onApplyPitTemp={handleApplyPitTemp}
+                  />
+                )];
+              }
+
+              const availablePartners = probes.filter(
+                (p) => !p.groupId && p.id !== probe.id
+              );
+              return [(
+                <ProbeCard
+                  key={probe.id}
+                  probe={probe}
+                  data={sensorData}
+                  sessionId={selectedSessionId || sessionId}
+                  itemTypes={itemTypes || []}
+                  unit={unit}
+                  onSetAlert={handleSetAlert}
+                  onClearAlert={onClearAlert}
+                  onItemChange={handleItemChange}
+                  onApplyPitTemp={handleApplyPitTemp}
+                  availablePartners={availablePartners}
+                  onGroupWith={handleLinkProbe}
+                />
+              )];
+            });
+          })()}
         </div>
       </div>
 

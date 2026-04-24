@@ -53,7 +53,7 @@ function computeRateOfRise(data, probeId, window = 10) {
   return Math.round((delta / (vals.length - 1)) * 60 * 10) / 10;
 }
 
-function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp }) {
+function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp, availablePartners = [], onGroupWith }) {
   const [itemType,     setItemType]     = useState(probe.itemType   ?? "");
   const [itemWeight,   setItemWeight]   = useState(probe.itemWeight ?? "");
   // alerts stored internally in °F
@@ -286,6 +286,20 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
               />
             </div>
           </div>
+          {availablePartners.length > 0 && (
+            <div className="config-row">
+              <label>Group</label>
+              <select
+                value=""
+                onChange={(e) => e.target.value && onGroupWith?.(probe.id, e.target.value)}
+              >
+                <option value="">Link with probe…</option>
+                {availablePartners.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="config-actions">
             <button className="probe-btn probe-btn--save" onClick={saveAlerts}>Save</button>
             {(minAlertF || maxAlertF) && (

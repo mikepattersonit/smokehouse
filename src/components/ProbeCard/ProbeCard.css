@@ -248,6 +248,88 @@
   flex-wrap: wrap;
 }
 
+/* ── Grouped probe card ─────────────────────────────────── */
+
+.probe-card--grouped {
+  grid-column: span 2; /* takes two columns in the probes grid */
+}
+
+.probe-card__group-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Side-by-side temperature columns */
+.probe-card__dual-temps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--border);
+}
+
+.probe-card__dual-temp-cell {
+  padding: 10px 14px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.probe-card__dual-temp-cell:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.probe-card__dual-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text3);
+  margin-bottom: 2px;
+}
+
+.probe-card__temp--sm {
+  font-size: 2rem;
+}
+
+/* Side-by-side sparklines */
+.probe-card__dual-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.probe-card__dual-charts .probe-card__chart {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.probe-card__dual-charts .probe-card__chart:last-child {
+  border-right: none;
+}
+
+/* Ungroup button */
+.probe-btn--ungroup {
+  background: transparent;
+  color: var(--text3);
+  border: 1px solid var(--border2);
+  font-size: 0.65rem;
+  padding: 3px 8px;
+  flex-shrink: 0;
+}
+
+/* Section labels inside grouped config */
+.config-section-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
 /* Empty state */
 .probe-card__empty {
   display: flex;
