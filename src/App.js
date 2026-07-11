@@ -28,7 +28,6 @@ export default function App() {
   const [itemTypes, setItemTypes] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [targetPitTempF, setTargetPitTempF] = useState(""); // always stored in °F
-  const [mobileNumber, setMobileNumber] = useState("");
   const [unit, setUnit] = useState("F"); // 'F' | 'C'
   const [sessionElapsed, setSessionElapsed] = useState(null);
   const [sessionActive, setSessionActive] = useState(false);
@@ -205,9 +204,9 @@ export default function App() {
     const probeName = current?.name || id;
     setAlerts((prev) => [
       ...prev,
-      { probeId: id, min: minF, max: maxF, probeName, active: true, mobileNumber },
+      { probeId: id, min: minF, max: maxF, probeName, active: true },
     ]);
-  }, [probes, mobileNumber]);
+  }, [probes]);
 
   const handleItemChange = useCallback(async (id, itemType, itemWeight) => {
     setProbes((prev) => {
@@ -323,17 +322,6 @@ export default function App() {
             >
               °{unit === "F" ? "C" : "F"}
             </button>
-            <div className="mobile-field">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18"/>
-              </svg>
-              <input
-                type="tel"
-                placeholder="(555) 123-4567"
-                value={mobileNumber}
-                onChange={(e) => setMobileNumber(e.target.value)}
-              />
-            </div>
           </div>
         </div>
         <div className="header-session-row">
