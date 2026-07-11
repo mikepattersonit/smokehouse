@@ -10,7 +10,7 @@ from boto3.dynamodb.conditions import Key
 
 # ---------- Config ----------
 REGION               = os.getenv("AWS_REGION", "us-east-2")
-BEDROCK_MODEL        = os.getenv("BEDROCK_MODEL", "us.anthropic.claude-3-5-haiku-20241022-v1:0")
+BEDROCK_MODEL        = os.getenv("BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5")
 PROBE_TABLE          = os.getenv("PROBE_ASSIGNMENT_TABLE", "probe_assignments")
 SENSOR_TABLE         = os.getenv("SENSOR_DATA_TABLE", "sensor_data")
 SESSIONS_TABLE       = os.getenv("SESSIONS_TABLE", "sessions")
@@ -165,6 +165,82 @@ def _build_milestones(rows, session_id, probe_id, n=MILESTONE_POINTS):
         })
     return result
 
+# ---------- Output schemas (structured outputs — Bedrock enforces these server-side) ----------
+_HOT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "eta_hours": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "Estimated hours until the probe reaches target_internal_temp_f. "
+                           "Null if there isn't enough data yet.",
+        },
+        "doneness_percent": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "0-100 estimate of how far through the cook the product is. "
+                           "Null if there isn't enough data yet.",
+        },
+        "stall_detected": {
+            "type": "boolean",
+            "description": "True if probe temp has plateaued over the recent readings.",
+        },
+        "target_internal_temp_f": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "The target internal temperature for this cut, echoed back for confirmation.",
+        },
+        "recommended_pit_temp_f": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "Suggested pit temperature adjustment, if any.",
+        },
+        "rest_time_minutes": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "Recommended rest time after pulling, appropriate to this cut.",
+        },
+        "notes": {
+            "type": "string",
+            "description": "Concise, specific coaching notes — call out stalls, fire issues, or timing concerns.",
+        },
+    },
+    "required": ["eta_hours", "doneness_percent", "stall_detected", "target_internal_temp_f",
+                 "recommended_pit_temp_f", "rest_time_minutes", "notes"],
+    "additionalProperties": False,
+}
+
+_COLD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "eta_hours": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "Estimated remaining hours the product can safely continue smoking "
+                           "before risking max_safe_temp_f. Null if there isn't enough data yet.",
+        },
+        "doneness_percent": {"type": "null", "description": "Not applicable to cold smoke."},
+        "stall_detected": {
+            "type": "boolean",
+            "description": "True only if product temp is climbing dangerously toward "
+                           "max_safe_temp_f — not the normal hot-smoke stall.",
+        },
+        "target_internal_temp_f": {"type": "null", "description": "Not applicable to cold smoke."},
+        "recommended_pit_temp_f": {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "description": "Suggested pit temperature adjustment to stay under max_safe_temp_f, if any.",
+        },
+        "rest_time_minutes": {"type": "null", "description": "Not applicable to cold smoke."},
+        "notes": {
+            "type": "string",
+            "description": "Concise, specific coaching notes.",
+        },
+    },
+    "required": ["eta_hours", "doneness_percent", "stall_detected", "target_internal_temp_f",
+                 "recommended_pit_temp_f", "rest_time_minutes", "notes"],
+    "additionalProperties": False,
+}
+
+_SPARSE_DATA_GUIDANCE = (
+    "If fewer than 3 milestones are available or total_elapsed_minutes is under 20, the cook has "
+    "just started: return null for eta_hours (and doneness_percent, for hot smoke) and explain in "
+    "notes that it's too early to estimate."
+)
+
 # ---------- Prompt ----------
 def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
                   item_target_temp, item_max_safe_temp, target_pit_temp_f,
@@ -178,8 +254,9 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "it is to infuse smoke flavor while keeping the product temperature below the "
             "max_safe_temp_f at all times. Elevated temperatures will melt fat, denature "
             "proteins prematurely, or create food safety issues. "
-            "All temperatures are Fahrenheit. Be concise and specific. "
-            "Respond with strict JSON only, no markdown or extra text."
+            "All temperatures are Fahrenheit. "
+            f"{_SPARSE_DATA_GUIDANCE} "
+            "Be concise and specific — no generic advice."
         )
         context = {
             "meat_type":             meat_type,
@@ -195,22 +272,21 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
         user_msg = (
             f"Session context:\n{json.dumps(context)}\n\n"
             f"Temperature milestones ({len(milestones)} points; min=elapsed minutes, "
-            f"pit=pit temp, probe=product temp):\n{json.dumps(milestones)}\n\n"
-            "Return strict JSON — for cold smoke, eta_hours means remaining safe smoke time, "
-            "doneness_percent is not applicable (null), stall_detected is false unless "
-            "product temp is climbing dangerously:\n"
-            '{"eta_hours": number|null, "doneness_percent": null, "stall_detected": false, '
-            '"target_internal_temp_f": null, "recommended_pit_temp_f": number|null, '
-            '"rest_time_minutes": null, "notes": string}'
+            f"pit=pit temp, probe=product temp):\n{json.dumps(milestones)}"
         )
+        schema = _COLD_SCHEMA
     else:
         system_msg = (
             "You are an expert BBQ pitmaster coach. Analyze the smokehouse session data and "
             "provide precise, actionable guidance. All temperatures are Fahrenheit. "
             "Use warmup time and outside temp to understand how the pit performs in current conditions. "
             "Use milestones to identify trends, stalls, and whether the cook is on track. "
-            "Be concise and specific — no generic advice. "
-            "Respond with strict JSON only, no markdown or extra text."
+            "The classic BBQ 'stall' happens when product temp plateaus around 150-170F due to "
+            "evaporative cooling — this is normal and resolves on its own or with wrapping. A stall "
+            "detected outside that range usually signals a fire or fuel problem rather than biology "
+            "— call that out explicitly in notes when it happens. "
+            f"{_SPARSE_DATA_GUIDANCE} "
+            "Be concise and specific — no generic advice."
         )
         context = {
             "meat_type":               meat_type,
@@ -231,22 +307,20 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             f"Session context:\n{json.dumps(context)}\n\n"
             f"Temperature milestones ({len(milestones)} evenly-spaced points; "
             f"min=elapsed minutes, pit=avg pit temp, probe=probe temp):\n"
-            f"{json.dumps(milestones)}\n\n"
-            "Return strict JSON:\n"
-            '{"eta_hours": number|null, "doneness_percent": number|null, "stall_detected": boolean, '
-            '"target_internal_temp_f": number|null, "recommended_pit_temp_f": number|null, '
-            '"rest_time_minutes": number|null, "notes": string}'
+            f"{json.dumps(milestones)}"
         )
+        schema = _HOT_SCHEMA
 
-    return system_msg, user_msg
+    return system_msg, user_msg, schema
 
 # ---------- Bedrock invoke ----------
-def _invoke_bedrock(system_msg, user_msg):
+def _invoke_bedrock(system_msg, user_msg, schema):
     body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 512,
         "system":     system_msg,
         "messages":   [{"role": "user", "content": user_msg}],
+        "output_config": {"format": {"type": "json_schema", "schema": schema}},
     }
     response = _bedrock.invoke_model(
         modelId      = BEDROCK_MODEL,
@@ -378,7 +452,7 @@ def lambda_handler(event, context):
     milestones = _build_milestones(rows, session_id, probe_id)
 
     # 7. Call Bedrock
-    system_msg, user_msg = _build_prompt(
+    system_msg, user_msg, schema = _build_prompt(
         probe_id              = probe_id,
         meat_type             = meat_type,
         meat_weight           = meat_weight,
@@ -398,15 +472,8 @@ def lambda_handler(event, context):
     )
 
     try:
-        content = _invoke_bedrock(system_msg, user_msg)
-        # Strip potential markdown fencing
-        text = content.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-        advice = json.loads(text)
+        content = _invoke_bedrock(system_msg, user_msg, schema)
+        advice = json.loads(content)
         if not isinstance(advice, dict):
             advice = {"notes": str(advice)}
     except Exception as e:
