@@ -19,6 +19,17 @@ function fmtElapsed(ms) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+// Retries a failing save once before giving up, so a single transient
+// network/cold-start blip doesn't silently drop a user's change.
+async function withRetry(fn, retryDelayMs = 800) {
+  try {
+    return await fn();
+  } catch (e) {
+    await new Promise((r) => setTimeout(r, retryDelayMs));
+    return fn();
+  }
+}
+
 export default function App() {
   const [sessionId, setSessionId] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState("");
@@ -36,6 +47,7 @@ export default function App() {
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const inFlightRef = useRef(false);
+  const pitTempLoadedForRef = useRef("");
   const assignmentsLoadedForRef = useRef("");
 
   const [probes, setProbes] = useState([
@@ -66,6 +78,11 @@ export default function App() {
 
   // isLive: viewing the latest session AND the smokehouse is actively sending data
   const isLive = (!selectedSessionId || selectedSessionId === sessionId) && sessionActive;
+
+  // The session currently being viewed (historical or live) — every read AND
+  // write (probe assignments, alerts, pit temp) must be scoped to this, not
+  // the bare `sessionId`, which is always the live session.
+  const viewSessionId = selectedSessionId || sessionId;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -128,33 +145,38 @@ export default function App() {
         }))
       );
 
-      // Load session-level data and probe assignments once per session
-      if (assignmentsLoadedForRef.current !== sid) {
-        assignmentsLoadedForRef.current = sid;
-
-        // Restore target pit temp saved by the backend
+      // Restore target pit temp saved by the backend — once per LIVE session.
+      // fetchLatestSession() only ever returns the live session's own data, so
+      // this can't be scoped to whichever historical session is being viewed.
+      if (pitTempLoadedForRef.current !== sid) {
+        pitTempLoadedForRef.current = sid;
         if (session.target_pit_temp_f != null) {
           setTargetPitTempF(String(session.target_pit_temp_f));
         }
+      }
 
-        // Restore probe assignments (item type, weight, alert thresholds, group)
-        const assignments = await fetchProbeAssignments(sid);
-        if (assignments.length > 0) {
-          setProbes((prev) =>
-            prev.map((p) => {
-              const a = assignments.find((x) => x.probe_id === p.id);
-              if (!a) return p;
-              return {
-                ...p,
-                itemType:   a.item_type   ?? p.itemType,
-                itemWeight: a.item_weight ?? p.itemWeight,
-                minAlert:   a.min_alert  != null ? String(a.min_alert)  : p.minAlert,
-                maxAlert:   a.max_alert  != null ? String(a.max_alert)  : p.maxAlert,
-                groupId:    a.group_id   ?? null,
-              };
-            })
-          );
-        }
+      // Restore probe assignments (item type, weight, alert thresholds, group)
+      // for whichever session is currently being viewed — reloads every time
+      // the viewed session changes, not just when the live session changes.
+      if (assignmentsLoadedForRef.current !== viewSid) {
+        assignmentsLoadedForRef.current = viewSid;
+        const assignments = await fetchProbeAssignments(viewSid);
+        setProbes((prev) =>
+          prev.map((p) => {
+            const a = assignments.find((x) => x.probe_id === p.id);
+            // No `if (!a) return p` fallback here on purpose: a probe with no
+            // assignment in the viewed session must reset to blank, not keep
+            // whatever was displayed for the previously-viewed session.
+            return {
+              ...p,
+              itemType:   a?.item_type   ?? "",
+              itemWeight: a?.item_weight ?? "",
+              minAlert:   a?.min_alert  != null ? String(a.min_alert) : "",
+              maxAlert:   a?.max_alert  != null ? String(a.max_alert) : "",
+              groupId:    a?.group_id   ?? null,
+            };
+          })
+        );
       }
     } catch {
       setError("Failed to load data");
@@ -189,11 +211,12 @@ export default function App() {
   const handleApplyPitTemp = useCallback(async (tempF) => {
     setTargetPitTempF(String(tempF));
     try {
-      await updateSession({ session_id: sessionId, target_pit_temp_f: tempF });
+      await withRetry(() => updateSession({ session_id: viewSessionId, target_pit_temp_f: tempF }));
     } catch (e) {
       console.error("Failed to save target pit temp:", e); // eslint-disable-line no-console
+      setError("Failed to save target pit temp — please try again.");
     }
-  }, [sessionId]);
+  }, [viewSessionId]);
 
   const onClearAlert = useCallback((probeId) => {
     setAlerts((prev) => prev.filter((a) => a.probeId !== probeId));
@@ -222,19 +245,20 @@ export default function App() {
       const groupProbes = probe?.groupId
         ? probes.filter((p) => p.groupId === probe.groupId)
         : [probe];
-      await Promise.all(
+      await withRetry(() => Promise.all(
         groupProbes.map((p) =>
           saveProbeAssignment({
-            sessionId, probeId: p.id, itemType, itemWeight,
+            sessionId: viewSessionId, probeId: p.id, itemType, itemWeight,
             minAlert: p.minAlert || null, maxAlert: p.maxAlert || null,
             groupId: probe.groupId || null,
           })
         )
-      );
+      ));
     } catch (e) {
       console.error("Error saving probe assignment:", e?.message || e); // eslint-disable-line no-console
+      setError("Failed to save item assignment — please try again.");
     }
-  }, [probes, sessionId]);
+  }, [probes, viewSessionId]);
 
   const handleLinkProbe = useCallback(async (myId, partnerId) => {
     const groupId = myId;
@@ -251,28 +275,30 @@ export default function App() {
       )
     );
     try {
-      await Promise.all([
-        saveProbeAssignment({ sessionId, probeId: myId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: myProbe?.minAlert || null, maxAlert: myProbe?.maxAlert || null, groupId }),
-        saveProbeAssignment({ sessionId, probeId: partnerId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: partnerProbe?.minAlert || null, maxAlert: partnerProbe?.maxAlert || null, groupId }),
-      ]);
+      await withRetry(() => Promise.all([
+        saveProbeAssignment({ sessionId: viewSessionId, probeId: myId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: myProbe?.minAlert || null, maxAlert: myProbe?.maxAlert || null, groupId }),
+        saveProbeAssignment({ sessionId: viewSessionId, probeId: partnerId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: partnerProbe?.minAlert || null, maxAlert: partnerProbe?.maxAlert || null, groupId }),
+      ]));
     } catch (e) {
       console.error("Error linking probes:", e?.message || e); // eslint-disable-line no-console
+      setError("Failed to link probes — please try again.");
     }
-  }, [probes, sessionId]);
+  }, [probes, viewSessionId]);
 
   const handleUnlinkProbe = useCallback(async (groupId) => {
     const groupProbes = probes.filter((p) => p.groupId === groupId);
     setProbes((prev) => prev.map((p) => p.groupId === groupId ? { ...p, groupId: null } : p));
     try {
-      await Promise.all(
+      await withRetry(() => Promise.all(
         groupProbes.map((p) =>
-          saveProbeAssignment({ sessionId, probeId: p.id, itemType: p.itemType, itemWeight: p.itemWeight, minAlert: p.minAlert || null, maxAlert: p.maxAlert || null, groupId: null })
+          saveProbeAssignment({ sessionId: viewSessionId, probeId: p.id, itemType: p.itemType, itemWeight: p.itemWeight, minAlert: p.minAlert || null, maxAlert: p.maxAlert || null, groupId: null })
         )
-      );
+      ));
     } catch (e) {
       console.error("Error unlinking probes:", e?.message || e); // eslint-disable-line no-console
+      setError("Failed to unlink probes — please try again.");
     }
-  }, [probes, sessionId]);
+  }, [probes, viewSessionId]);
 
   // Pit temp display value (convert F→display unit)
   const pitTempDisplay = targetPitTempF !== ""
@@ -328,7 +354,7 @@ export default function App() {
           <SessionSelector
             sessions={sessions}
             currentId={sessionId}
-            selectedId={selectedSessionId || sessionId}
+            selectedId={viewSessionId}
             onSelect={handleSessionSelect}
             loading={sessionsLoading}
             sessionActive={sessionActive}
@@ -385,8 +411,10 @@ export default function App() {
             setTargetPitTempF(f != null ? String(f) : "");
           }}
           onBlur={() => {
-            if (targetPitTempF && sessionId)
-              updateSession({ session_id: sessionId, target_pit_temp_f: Number(targetPitTempF) }).catch(() => {});
+            if (targetPitTempF && viewSessionId) {
+              withRetry(() => updateSession({ session_id: viewSessionId, target_pit_temp_f: Number(targetPitTempF) }))
+                .catch(() => setError("Failed to save target pit temp — please try again."));
+            }
           }}
           placeholder={unit === "C" ? "e.g. 107" : "e.g. 225"}
         />
@@ -397,7 +425,7 @@ export default function App() {
       <div className="main-chart-section">
         <div className="section-label">Smokehouse Temperature History</div>
         {sensorData.length > 0
-          ? <Chart data={sensorData} sessionId={selectedSessionId || sessionId} unit={unit} />
+          ? <Chart data={sensorData} sessionId={viewSessionId} unit={unit} />
           : <div style={{ color: "var(--text3)", fontSize: "0.85rem", padding: "20px 0" }}>No data yet.</div>
         }
         <div className="chart-legend">
@@ -429,7 +457,7 @@ export default function App() {
                     key={group.map((p) => p.id).join("+")}
                     probes={group}
                     data={sensorData}
-                    sessionId={selectedSessionId || sessionId}
+                    sessionId={viewSessionId}
                     itemTypes={itemTypes || []}
                     unit={unit}
                     onSetAlert={handleSetAlert}
@@ -449,7 +477,7 @@ export default function App() {
                   key={probe.id}
                   probe={probe}
                   data={sensorData}
-                  sessionId={selectedSessionId || sessionId}
+                  sessionId={viewSessionId}
                   itemTypes={itemTypes || []}
                   unit={unit}
                   onSetAlert={handleSetAlert}

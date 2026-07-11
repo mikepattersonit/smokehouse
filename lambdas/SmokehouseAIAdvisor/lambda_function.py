@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -171,13 +172,11 @@ _HOT_SCHEMA = {
     "properties": {
         "eta_hours": {
             "anyOf": [{"type": "number"}, {"type": "null"}],
-            "description": "Estimated hours until the probe reaches target_internal_temp_f. "
-                           "Null if there isn't enough data yet.",
+            "description": "Estimated hours until the probe reaches target_internal_temp_f.",
         },
         "doneness_percent": {
             "anyOf": [{"type": "number"}, {"type": "null"}],
-            "description": "0-100 estimate of how far through the cook the product is. "
-                           "Null if there isn't enough data yet.",
+            "description": "0-100 estimate of how far through the cook the product is.",
         },
         "stall_detected": {
             "type": "boolean",
@@ -211,7 +210,7 @@ _COLD_SCHEMA = {
         "eta_hours": {
             "anyOf": [{"type": "number"}, {"type": "null"}],
             "description": "Estimated remaining hours the product can safely continue smoking "
-                           "before risking max_safe_temp_f. Null if there isn't enough data yet.",
+                           "before risking max_safe_temp_f.",
         },
         "doneness_percent": {"type": "null", "description": "Not applicable to cold smoke."},
         "stall_detected": {
@@ -270,9 +269,9 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "rate_of_rise_f_per_hr": rate_of_rise,
         }
         user_msg = (
-            f"Session context:\n{json.dumps(context)}\n\n"
+            f"Session context:\n{json.dumps(context, separators=(',', ':'))}\n\n"
             f"Temperature milestones ({len(milestones)} points; min=elapsed minutes, "
-            f"pit=pit temp, probe=product temp):\n{json.dumps(milestones)}"
+            f"pit=pit temp, probe=product temp):\n{json.dumps(milestones, separators=(',', ':'))}"
         )
         schema = _COLD_SCHEMA
     else:
@@ -304,10 +303,10 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "stall_detected":          stall_detected,
         }
         user_msg = (
-            f"Session context:\n{json.dumps(context)}\n\n"
+            f"Session context:\n{json.dumps(context, separators=(',', ':'))}\n\n"
             f"Temperature milestones ({len(milestones)} evenly-spaced points; "
             f"min=elapsed minutes, pit=avg pit temp, probe=probe temp):\n"
-            f"{json.dumps(milestones)}"
+            f"{json.dumps(milestones, separators=(',', ':'))}"
         )
         schema = _HOT_SCHEMA
 
@@ -346,7 +345,17 @@ def lambda_handler(event, context):
     if not session_id or not probe_id:
         return _resp(400, {"error": "session_id and probe_id are required"})
 
-    # 1. Fetch probe assignment
+    # 1. Check advice cache first — a hit needs neither the probe assignment
+    # nor the meat_types lookup below, so this skips two DynamoDB reads on
+    # every repeated "AI Guidance" click within the cache window.
+    now          = int(time.time())
+    cached_probe = _get_analytics(session_id, probe_id)
+    if cached_probe and cached_probe.get("last_advice_at"):
+        age_minutes = (now - int(cached_probe["last_advice_at"])) / 60
+        if age_minutes < ADVICE_CACHE_MINUTES and cached_probe.get("last_advice"):
+            return _resp(200, {"advice": cached_probe["last_advice"], "cached": True})
+
+    # 2. Fetch probe assignment
     try:
         probe_result = _ddb.Table(PROBE_TABLE).query(
             KeyConditionExpression=Key("session_id").eq(session_id) & Key("probe_id").eq(probe_id)
@@ -374,27 +383,25 @@ def lambda_handler(event, context):
     except Exception:
         pass
 
-    # 2. Check advice cache
-    now          = int(time.time())
-    cached_probe = _get_analytics(session_id, probe_id)
-    if cached_probe and cached_probe.get("last_advice_at"):
-        age_minutes = (now - int(cached_probe["last_advice_at"])) / 60
-        if age_minutes < ADVICE_CACHE_MINUTES and cached_probe.get("last_advice"):
-            return _resp(200, {"advice": cached_probe["last_advice"], "cached": True})
-
     # 3. Fetch sensor data: oldest WARMUP_FETCH rows + newest RECENT_FETCH rows
+    # (two independent queries — run concurrently rather than back-to-back)
     try:
-        sensor_table  = _ddb.Table(SENSOR_TABLE)
-        warmup_result = sensor_table.query(
-            KeyConditionExpression=Key("session_id").eq(session_id),
-            ScanIndexForward=True,
-            Limit=WARMUP_FETCH,
-        )
-        recent_result = sensor_table.query(
-            KeyConditionExpression=Key("session_id").eq(session_id),
-            ScanIndexForward=False,
-            Limit=RECENT_FETCH,
-        )
+        sensor_table = _ddb.Table(SENSOR_TABLE)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            warmup_future = pool.submit(
+                sensor_table.query,
+                KeyConditionExpression=Key("session_id").eq(session_id),
+                ScanIndexForward=True,
+                Limit=WARMUP_FETCH,
+            )
+            recent_future = pool.submit(
+                sensor_table.query,
+                KeyConditionExpression=Key("session_id").eq(session_id),
+                ScanIndexForward=False,
+                Limit=RECENT_FETCH,
+            )
+            warmup_result = warmup_future.result()
+            recent_result = recent_future.result()
         warmup_rows = [_to_native(i) for i in warmup_result.get("Items", [])]
         recent_rows = list(reversed([_to_native(i) for i in recent_result.get("Items", [])]))
 
