@@ -11,7 +11,7 @@ from boto3.dynamodb.conditions import Key
 
 # ---------- Config ----------
 REGION               = os.getenv("AWS_REGION", "us-east-2")
-BEDROCK_MODEL        = os.getenv("BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5")
+BEDROCK_MODEL        = os.getenv("BEDROCK_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 PROBE_TABLE          = os.getenv("PROBE_ASSIGNMENT_TABLE", "probe_assignments")
 SENSOR_TABLE         = os.getenv("SENSOR_DATA_TABLE", "sensor_data")
 SESSIONS_TABLE       = os.getenv("SESSIONS_TABLE", "sessions")
