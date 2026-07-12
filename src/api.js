@@ -14,6 +14,10 @@ const ASSIGN_URL =
   process.env.REACT_APP_ASSIGN_URL ||
   "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageProbeAssignments";
 
+const CONTACTS_URL =
+  process.env.REACT_APP_CONTACTS_URL ||
+  "https://hgrhqnwar6.execute-api.us-east-2.amazonaws.com/ManageAlertContacts";
+
 // ---------- Helper ----------
 async function jsonFetch(url, options = {}) {
   const res = await fetch(url, options);
@@ -167,4 +171,39 @@ function toNullableNumber(v) {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// ---------- Alert contacts (household notification list) ----------
+/** GET all household contacts -> [{ phone_number, name, enabled, created_at }, ...] */
+export async function fetchAlertContacts() {
+  try {
+    const res = await jsonFetch(CONTACTS_URL);
+    return Array.isArray(res?.items) ? res.items : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * POST upsert a contact. Partial update: only {phoneNumber, enabled} toggles
+ * enabled without touching the stored name; include name to set/change it.
+ */
+export async function saveAlertContact({ phoneNumber, name, enabled }) {
+  if (!phoneNumber) throw new Error("saveAlertContact: phoneNumber required");
+  const payload = { phoneNumber };
+  if (name !== undefined) payload.name = name;
+  if (enabled !== undefined) payload.enabled = enabled;
+  return jsonFetch(CONTACTS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** DELETE a contact by phone number */
+export async function deleteAlertContact(phoneNumber) {
+  if (!phoneNumber) throw new Error("deleteAlertContact: phoneNumber required");
+  return jsonFetch(`${CONTACTS_URL}?phone_number=${encodeURIComponent(phoneNumber)}`, {
+    method: "DELETE",
+  });
 }
