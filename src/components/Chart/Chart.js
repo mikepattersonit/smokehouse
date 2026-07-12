@@ -7,8 +7,8 @@ import { toDisplay, unitLabel } from "../../utils/temperature";
 function parseTimestamp(ts, sessionId) {
   if (!ts) return null;
 
-  // "YYYYMMDDTHHMMSSZ"
-  if (typeof ts === "string" && ts.length >= 17 && ts.includes("T") && ts.endsWith("Z")) {
+  // "YYYYMMDDTHHMMSSZ" (16 chars: 8-digit date + "T" + 6-digit time + "Z")
+  if (typeof ts === "string" && ts.length >= 16 && ts.includes("T") && ts.endsWith("Z")) {
     const iso = `${ts.slice(0,4)}-${ts.slice(4,6)}-${ts.slice(6,8)}T${ts.slice(9,11)}:${ts.slice(11,13)}:${ts.slice(13,15)}Z`;
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? null : d;
