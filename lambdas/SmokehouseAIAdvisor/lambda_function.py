@@ -112,6 +112,43 @@ def _compute_warmup(rows, session_id, target_pit_temp_f, hold_readings=5):
             return above[i][0]
     return None
 
+# ---------- Probe insertion point (manual mark, or auto-detected) ----------
+def _find_row_index_at_or_after(rows, session_id, target_elapsed_min):
+    """First row whose elapsed time is >= target_elapsed_min."""
+    for i, row in enumerate(rows):
+        row_elapsed = _elapsed_minutes(session_id, row.get("timestamp"))
+        if row_elapsed is not None and row_elapsed >= target_elapsed_min:
+            return i
+    return None
+
+def _detect_insertion_index(rows, probe_id, drop_threshold=50):
+    """Index of the reading right after the most recent sudden drop in this
+    probe's own temperature history — the signature of a probe moving from
+    ambient pit air into cold meat (as opposed to a gradual pit-temp swing).
+    Returns None if no such drop is found."""
+    last_val = None
+    last_idx = None
+    for i, row in enumerate(rows):
+        v = row.get(probe_id)
+        if v is None or float(v) == -999:
+            continue
+        v = float(v)
+        if last_val is not None and last_val - v >= drop_threshold:
+            last_idx = i
+        last_val = v
+    return last_idx
+
+def _find_insertion_index(rows, session_id, probe_id, manual_inserted_at):
+    """Manual mark takes priority over auto-detection; returns None if
+    neither applies (probe was in place from the start, or no signal)."""
+    if manual_inserted_at:
+        target_elapsed = _elapsed_minutes(session_id, manual_inserted_at)
+        if target_elapsed is not None:
+            idx = _find_row_index_at_or_after(rows, session_id, target_elapsed)
+            if idx is not None:
+                return idx
+    return _detect_insertion_index(rows, probe_id)
+
 # ---------- Session analytics cache ----------
 def _get_analytics(session_id, metric):
     try:
@@ -235,9 +272,19 @@ _COLD_SCHEMA = {
 }
 
 _SPARSE_DATA_GUIDANCE = (
-    "If fewer than 3 milestones are available or total_elapsed_minutes is under 20, the cook has "
+    "If fewer than 3 milestones are available or minutes_since_insertion is under 20, this cut has "
     "just started: return null for eta_hours (and doneness_percent, for hot smoke) and explain in "
     "notes that it's too early to estimate."
+)
+
+_INSERTION_GUIDANCE = (
+    "minutes_since_insertion is how long THIS probe's cut has actually been cooking, measured from "
+    "when the probe went into the meat (either a manual mark, or an auto-detected sudden temperature "
+    "drop indicating the probe moved from ambient pit air into cold meat) — not from when the smoker "
+    "session started. total_elapsed_minutes is the whole session's length and may be much longer if "
+    "this probe was inserted partway through. Base ETA/doneness/stall judgments on "
+    "minutes_since_insertion and the milestones (which are also scoped to since-insertion), not on "
+    "total_elapsed_minutes."
 )
 
 # ---------- Prompt ----------
@@ -245,6 +292,7 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
                   item_target_temp, item_max_safe_temp, target_pit_temp_f,
                   warmup_minutes, outside_temp_at_start, avg_pit_temp,
                   rate_of_rise, stall_detected, elapsed_minutes,
+                  minutes_since_insertion,
                   current_probe_temp, current_pit_temp, milestones):
 
     if smoke_type == "cold":
@@ -254,19 +302,21 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "max_safe_temp_f at all times. Elevated temperatures will melt fat, denature "
             "proteins prematurely, or create food safety issues. "
             "All temperatures are Fahrenheit. "
+            f"{_INSERTION_GUIDANCE} "
             f"{_SPARSE_DATA_GUIDANCE} "
             "Be concise and specific — no generic advice."
         )
         context = {
-            "meat_type":             meat_type,
-            "weight_lbs":            meat_weight,
-            "smoke_type":            "cold",
-            "max_safe_temp_f":       item_max_safe_temp,
-            "outside_temp_f":        outside_temp_at_start,
-            "total_elapsed_minutes": elapsed_minutes,
-            "current_probe_temp_f":  current_probe_temp,
-            "current_pit_temp_f":    current_pit_temp,
-            "rate_of_rise_f_per_hr": rate_of_rise,
+            "meat_type":               meat_type,
+            "weight_lbs":              meat_weight,
+            "smoke_type":              "cold",
+            "max_safe_temp_f":         item_max_safe_temp,
+            "outside_temp_f":          outside_temp_at_start,
+            "total_elapsed_minutes":   elapsed_minutes,
+            "minutes_since_insertion": minutes_since_insertion,
+            "current_probe_temp_f":    current_probe_temp,
+            "current_pit_temp_f":      current_pit_temp,
+            "rate_of_rise_f_per_hr":   rate_of_rise,
         }
         user_msg = (
             f"Session context:\n{json.dumps(context, separators=(',', ':'))}\n\n"
@@ -284,6 +334,7 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "evaporative cooling — this is normal and resolves on its own or with wrapping. A stall "
             "detected outside that range usually signals a fire or fuel problem rather than biology "
             "— call that out explicitly in notes when it happens. "
+            f"{_INSERTION_GUIDANCE} "
             f"{_SPARSE_DATA_GUIDANCE} "
             "Be concise and specific — no generic advice."
         )
@@ -297,6 +348,7 @@ def _build_prompt(probe_id, meat_type, meat_weight, smoke_type,
             "warmup_minutes":          warmup_minutes,
             "avg_pit_temp_f":          avg_pit_temp,
             "total_elapsed_minutes":   elapsed_minutes,
+            "minutes_since_insertion": minutes_since_insertion,
             "current_probe_temp_f":    current_probe_temp,
             "current_pit_temp_f":      current_pit_temp,
             "rate_of_rise_f_per_hr":   rate_of_rise,
@@ -443,11 +495,26 @@ def lambda_handler(event, context):
         }
         _put_analytics(session_id, "__session__", session_analytics)
 
-    # 5. Compute probe-level metrics
-    probe_temps     = [r.get(probe_id) for r in rows]
+    # 5. Determine when this probe actually went into the meat — a manual
+    # mark (probe_data["inserted_at"]) takes priority, else auto-detect a
+    # sudden drop in this probe's own history. Everything before that point
+    # is ambient pit air, not the meat, and would otherwise confuse
+    # rate-of-rise/stall/milestones for this specific cut.
+    insertion_idx = _find_insertion_index(rows, session_id, probe_id, probe_data.get("inserted_at"))
+    probe_rows    = rows[insertion_idx:] if insertion_idx is not None else rows
+
+    # 6. Compute probe-level metrics (scoped to probe_rows, i.e. since insertion)
+    probe_temps     = [r.get(probe_id) for r in probe_rows]
     rate_of_rise    = _compute_rate_of_rise(probe_temps)
     stall_detected  = _detect_stall(probe_temps)
     elapsed_minutes = _elapsed_minutes(session_id, rows[-1].get("timestamp")) if rows else 0
+
+    start_elapsed = _elapsed_minutes(session_id, probe_rows[0].get("timestamp")) if probe_rows else None
+    minutes_since_insertion = (
+        max(0, elapsed_minutes - start_elapsed)
+        if insertion_idx is not None and start_elapsed is not None
+        else elapsed_minutes
+    )
 
     last_row           = rows[-1]
     current_probe_temp = last_row.get(probe_id)
@@ -455,8 +522,8 @@ def lambda_handler(event, context):
         current_probe_temp = None
     current_pit_temp = _pit_avg(last_row)
 
-    # 6. Build milestones
-    milestones = _build_milestones(rows, session_id, probe_id)
+    # 7. Build milestones (scoped to probe_rows — this cut's own history)
+    milestones = _build_milestones(probe_rows, session_id, probe_id)
 
     # 7. Call Bedrock
     system_msg, user_msg, schema = _build_prompt(
@@ -473,6 +540,7 @@ def lambda_handler(event, context):
         rate_of_rise          = rate_of_rise,
         stall_detected        = stall_detected,
         elapsed_minutes       = elapsed_minutes,
+        minutes_since_insertion = minutes_since_insertion,
         current_probe_temp    = current_probe_temp,
         current_pit_temp      = current_pit_temp,
         milestones            = milestones,

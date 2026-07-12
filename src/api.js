@@ -124,8 +124,12 @@ export async function fetchProbeAssignments(sessionId) {
 
 /**
  * POST assignment to ManageProbeAssignments
- * params: { sessionId, probeId, itemType, itemWeight, minAlert, maxAlert, mobileNumber }
+ * params: { sessionId, probeId, itemType, itemWeight, minAlert, maxAlert, mobileNumber, insertedAt }
  * lambda expects camelCase keys as below (matches your working curl).
+ *
+ * This is a full replace (DynamoDB put_item), not a partial update — callers
+ * that only want to change one field (e.g. marking insertion time) must pass
+ * along the probe's other current fields too, or they'll be cleared.
  */
 export async function saveProbeAssignment({
   sessionId,
@@ -136,6 +140,7 @@ export async function saveProbeAssignment({
   maxAlert = null,
   mobileNumber = null,
   groupId = null,
+  insertedAt = null,
 }) {
   if (!sessionId || !probeId) {
     throw new Error("saveProbeAssignment: {sessionId, probeId} required");
@@ -149,6 +154,7 @@ export async function saveProbeAssignment({
     maxAlert: toNullableNumber(maxAlert),
     mobileNumber: mobileNumber || null,
     groupId: groupId || null,
+    insertedAt: insertedAt || null,
   };
   return jsonFetch(ASSIGN_URL, {
     method: "POST",

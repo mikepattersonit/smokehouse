@@ -19,6 +19,12 @@ function fmtElapsed(ms) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+// Current UTC time in the same compact "YYYYMMDDTHHMMSSZ" format the
+// sensor/firmware timestamps use, e.g. "20260712T211530Z".
+function nowCompactUtc() {
+  return new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+}
+
 // Retries a failing save once before giving up, so a single transient
 // network/cold-start blip doesn't silently drop a user's change.
 async function withRetry(fn, retryDelayMs = 800) {
@@ -48,12 +54,11 @@ export default function App() {
   const clockRef = useRef(null);
   const inFlightRef = useRef(false);
   const pitTempLoadedForRef = useRef("");
-  const assignmentsLoadedForRef = useRef("");
 
   const [probes, setProbes] = useState([
-    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
-    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
-    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null },
+    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
+    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
+    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
   ]);
 
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
@@ -156,28 +161,28 @@ export default function App() {
       }
 
       // Restore probe assignments (item type, weight, alert thresholds, group)
-      // for whichever session is currently being viewed — reloads every time
-      // the viewed session changes, not just when the live session changes.
-      if (assignmentsLoadedForRef.current !== viewSid) {
-        assignmentsLoadedForRef.current = viewSid;
-        const assignments = await fetchProbeAssignments(viewSid);
-        setProbes((prev) =>
-          prev.map((p) => {
-            const a = assignments.find((x) => x.probe_id === p.id);
-            // No `if (!a) return p` fallback here on purpose: a probe with no
-            // assignment in the viewed session must reset to blank, not keep
-            // whatever was displayed for the previously-viewed session.
-            return {
-              ...p,
-              itemType:   a?.item_type   ?? "",
-              itemWeight: a?.item_weight ?? "",
-              minAlert:   a?.min_alert  != null ? String(a.min_alert) : "",
-              maxAlert:   a?.max_alert  != null ? String(a.max_alert) : "",
-              groupId:    a?.group_id   ?? null,
-            };
-          })
-        );
-      }
+      // for whichever session is currently being viewed. Re-fetched on every
+      // poll (not just once per session view) so a change made from another
+      // device shows up here within one poll interval — consistent with how
+      // sensor data already refreshes.
+      const assignments = await fetchProbeAssignments(viewSid);
+      setProbes((prev) =>
+        prev.map((p) => {
+          const a = assignments.find((x) => x.probe_id === p.id);
+          // No `if (!a) return p` fallback here on purpose: a probe with no
+          // assignment in the viewed session must reset to blank, not keep
+          // whatever was displayed for the previously-viewed session.
+          return {
+            ...p,
+            itemType:   a?.item_type   ?? "",
+            itemWeight: a?.item_weight ?? "",
+            minAlert:   a?.min_alert  != null ? String(a.min_alert) : "",
+            maxAlert:   a?.max_alert  != null ? String(a.max_alert) : "",
+            groupId:    a?.group_id   ?? null,
+            insertedAt: a?.inserted_at ?? null,
+          };
+        })
+      );
     } catch {
       setError("Failed to load data");
     } finally {
@@ -204,7 +209,6 @@ export default function App() {
   const handleSessionSelect = useCallback((sid) => {
     selectedSessionIdRef.current = sid;
     setSelectedSessionId(sid);
-    assignmentsLoadedForRef.current = "";
     refreshData();
   }, [refreshData]);
 
@@ -250,7 +254,7 @@ export default function App() {
           saveProbeAssignment({
             sessionId: viewSessionId, probeId: p.id, itemType, itemWeight,
             minAlert: p.minAlert || null, maxAlert: p.maxAlert || null,
-            groupId: probe.groupId || null,
+            groupId: probe.groupId || null, insertedAt: p.insertedAt || null,
           })
         )
       ));
@@ -276,8 +280,8 @@ export default function App() {
     );
     try {
       await withRetry(() => Promise.all([
-        saveProbeAssignment({ sessionId: viewSessionId, probeId: myId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: myProbe?.minAlert || null, maxAlert: myProbe?.maxAlert || null, groupId }),
-        saveProbeAssignment({ sessionId: viewSessionId, probeId: partnerId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: partnerProbe?.minAlert || null, maxAlert: partnerProbe?.maxAlert || null, groupId }),
+        saveProbeAssignment({ sessionId: viewSessionId, probeId: myId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: myProbe?.minAlert || null, maxAlert: myProbe?.maxAlert || null, groupId, insertedAt: myProbe?.insertedAt || null }),
+        saveProbeAssignment({ sessionId: viewSessionId, probeId: partnerId, itemType: sharedItemType, itemWeight: sharedItemWeight, minAlert: partnerProbe?.minAlert || null, maxAlert: partnerProbe?.maxAlert || null, groupId, insertedAt: partnerProbe?.insertedAt || null }),
       ]));
     } catch (e) {
       console.error("Error linking probes:", e?.message || e); // eslint-disable-line no-console
@@ -291,12 +295,32 @@ export default function App() {
     try {
       await withRetry(() => Promise.all(
         groupProbes.map((p) =>
-          saveProbeAssignment({ sessionId: viewSessionId, probeId: p.id, itemType: p.itemType, itemWeight: p.itemWeight, minAlert: p.minAlert || null, maxAlert: p.maxAlert || null, groupId: null })
+          saveProbeAssignment({ sessionId: viewSessionId, probeId: p.id, itemType: p.itemType, itemWeight: p.itemWeight, minAlert: p.minAlert || null, maxAlert: p.maxAlert || null, groupId: null, insertedAt: p.insertedAt || null })
         )
       ));
     } catch (e) {
       console.error("Error unlinking probes:", e?.message || e); // eslint-disable-line no-console
       setError("Failed to unlink probes — please try again.");
+    }
+  }, [probes, viewSessionId]);
+
+  // Records the moment a probe actually goes into the meat, separate from
+  // session start — the advisor uses this instead of session-start elapsed
+  // time so warmup-in-ambient-pit-air readings don't get read as "the cook."
+  const handleMarkInserted = useCallback(async (id) => {
+    const insertedAt = nowCompactUtc();
+    setProbes((prev) => prev.map((p) => p.id === id ? { ...p, insertedAt } : p));
+    try {
+      const probe = probes.find((p) => p.id === id);
+      await withRetry(() => saveProbeAssignment({
+        sessionId: viewSessionId, probeId: id,
+        itemType: probe?.itemType, itemWeight: probe?.itemWeight,
+        minAlert: probe?.minAlert || null, maxAlert: probe?.maxAlert || null,
+        groupId: probe?.groupId || null, insertedAt,
+      }));
+    } catch (e) {
+      console.error("Error marking probe inserted:", e?.message || e); // eslint-disable-line no-console
+      setError("Failed to mark probe as inserted — please try again.");
     }
   }, [probes, viewSessionId]);
 
@@ -465,6 +489,7 @@ export default function App() {
                     onItemChange={handleItemChange}
                     onUngroup={handleUnlinkProbe}
                     onApplyPitTemp={handleApplyPitTemp}
+                    onMarkInserted={handleMarkInserted}
                   />
                 )];
               }
@@ -486,6 +511,7 @@ export default function App() {
                   onApplyPitTemp={handleApplyPitTemp}
                   availablePartners={availablePartners}
                   onGroupWith={handleLinkProbe}
+                  onMarkInserted={handleMarkInserted}
                 />
               )];
             });

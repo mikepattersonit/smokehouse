@@ -37,6 +37,21 @@ function elapsedMinutes(sessionId, timestamp) {
   }
 }
 
+function parseCompactUtc(ts) {
+  const s = String(ts || "").trim();
+  if (s.length < 16 || !s.includes("T") || !s.endsWith("Z")) return null;
+  const iso = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(9,11)}:${s.slice(11,13)}:${s.slice(13,15)}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function minutesSince(insertedAt, latestTimestamp) {
+  const start = parseCompactUtc(insertedAt);
+  const end = parseCompactUtc(latestTimestamp);
+  if (!start || !end) return null;
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
+}
+
 function fmtElapsed(minutes) {
   if (minutes === null || minutes === undefined) return null;
   const h = Math.floor(minutes / 60);
@@ -58,7 +73,7 @@ function computeRateOfRise(data, probeId, window = 10) {
   return Math.round((delta / (vals.length - 1)) * 60 * 10) / 10;
 }
 
-function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp, availablePartners = [], onGroupWith }) {
+function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp, availablePartners = [], onGroupWith, onMarkInserted }) {
   const [itemType,     setItemType]     = useState(probe.itemType   ?? "");
   const [itemWeight,   setItemWeight]   = useState(probe.itemWeight ?? "");
   // alerts stored internally in °F
@@ -69,13 +84,18 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
   const [advice,       setAdvice]       = useState(null);
   const [adviceCached, setAdviceCached] = useState(false);
 
+  // Re-sync local edit state whenever the underlying assignment actually
+  // changes — not just on mount. Depending only on probe.id (which never
+  // changes for a mounted card) meant data that arrived after the initial
+  // render (an async assignment fetch, a refresh, or another device's edit)
+  // never reached these inputs even though App.js's state was correct.
   useEffect(() => {
     setItemType(probe.itemType   ?? "");
     setItemWeight(probe.itemWeight ?? "");
     setMinAlertF(probe.minAlert  ?? "");
     setMaxAlertF(probe.maxAlert  ?? "");
     setAdvice(null);
-  }, [probe.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [probe.id, probe.itemType, probe.itemWeight, probe.minAlert, probe.maxAlert]);
 
   const selectedItem = useMemo(
     () => itemTypes.find((it) => it.name === itemType) || null,
@@ -106,6 +126,13 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
     if (!latestRow || !sessionId) return null;
     return elapsedMinutes(sessionId, latestRow.timestamp);
   }, [data, sessionId]);
+
+  const insertedElapsed = useMemo(() => {
+    if (!probe.insertedAt) return null;
+    const latestRow = data[0];
+    if (!latestRow) return null;
+    return minutesSince(probe.insertedAt, latestRow.timestamp);
+  }, [probe.insertedAt, data]);
 
   const hasItem = Boolean(itemType);
 
@@ -204,6 +231,12 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
           {rateLabel(rateOfRiseF) && <strong>{rateLabel(rateOfRiseF)}</strong>}
           {rateOfRiseF !== null && elapsed !== null && <span className="probe-card__meta-sep">·</span>}
           {elapsed !== null && <span>{fmtElapsed(elapsed)} elapsed</span>}
+          {insertedElapsed !== null && (
+            <>
+              <span className="probe-card__meta-sep">·</span>
+              <span>🔪 inserted {fmtElapsed(insertedElapsed)} ago</span>
+            </>
+          )}
         </div>
       )}
 
@@ -226,6 +259,11 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
         {hasItem && !isColdSmoke && (
           <button className="probe-btn probe-btn--ai" onClick={handleAdvisor} disabled={advisorBusy}>
             {advisorBusy ? "Getting AI…" : advice ? "↻ Refresh AI" : "🤖 AI Guidance"}
+          </button>
+        )}
+        {hasItem && (
+          <button className="probe-btn probe-btn--insert" onClick={() => onMarkInserted?.(probe.id)}>
+            📍 {probe.insertedAt ? "Re-mark Inserted" : "Mark Inserted"}
           </button>
         )}
         <button className="probe-btn probe-btn--config" onClick={() => setConfigOpen((o) => !o)}>
