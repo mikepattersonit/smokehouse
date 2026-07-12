@@ -4,7 +4,7 @@ import "./App.css";
 import Chart from "./components/Chart/Chart";
 import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
-import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments, saveProbeAssignment } from "./api";
+import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments, saveProbeAssignment, fetchAdvisorCache } from "./api";
 import GroupedProbeCard from "./components/ProbeCard/GroupedProbeCard";
 import ContactsModal from "./components/Contacts/ContactsModal";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
@@ -58,9 +58,9 @@ export default function App() {
   const pitTempLoadedForRef = useRef("");
 
   const [probes, setProbes] = useState([
-    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
-    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
-    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null },
+    { id: "probe1_temp", name: "Probe 1", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null, aiAdvice: null, aiAdviceCached: false },
+    { id: "probe2_temp", name: "Probe 2", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null, aiAdvice: null, aiAdviceCached: false },
+    { id: "probe3_temp", name: "Probe 3", minAlert: "", maxAlert: "", itemType: "", itemWeight: "", temperature: null, groupId: null, insertedAt: null, aiAdvice: null, aiAdviceCached: false },
   ]);
 
   const latest = useMemo(() => sensorData[0] || {}, [sensorData]);
@@ -168,9 +168,25 @@ export default function App() {
       // device shows up here within one poll interval — consistent with how
       // sensor data already refreshes.
       const assignments = await fetchProbeAssignments(viewSid);
+
+      // Restore each assigned probe's last AI guidance the same way — a
+      // read-only cache peek (never triggers a new Bedrock call) so the
+      // last response shown stays visible across refreshes and devices
+      // until someone clicks "Refresh AI" to rerun it.
+      const activeAssignments = assignments.filter((a) => a.item_type);
+      const adviceResults = await Promise.all(
+        activeAssignments.map((a) => fetchAdvisorCache(viewSid, a.probe_id))
+      );
+      const adviceByProbe = {};
+      activeAssignments.forEach((a, i) => {
+        const res = adviceResults[i];
+        if (res?.advice) adviceByProbe[a.probe_id] = { advice: res.advice, cached: !!res.cached };
+      });
+
       setProbes((prev) =>
         prev.map((p) => {
           const a = assignments.find((x) => x.probe_id === p.id);
+          const adv = adviceByProbe[p.id];
           // No `if (!a) return p` fallback here on purpose: a probe with no
           // assignment in the viewed session must reset to blank, not keep
           // whatever was displayed for the previously-viewed session.
@@ -182,6 +198,8 @@ export default function App() {
             maxAlert:   a?.max_alert  != null ? String(a.max_alert) : "",
             groupId:    a?.group_id   ?? null,
             insertedAt: a?.inserted_at ?? null,
+            aiAdvice:       adv ? adv.advice : null,
+            aiAdviceCached: adv ? adv.cached : false,
           };
         })
       );
@@ -325,6 +343,15 @@ export default function App() {
       setError("Failed to mark probe as inserted — please try again.");
     }
   }, [probes, viewSessionId]);
+
+  // Called by a probe card right after a fresh "AI Guidance" / "Refresh AI"
+  // response comes back, so it's reflected immediately instead of waiting
+  // for the next poll.
+  const handleAdviceUpdate = useCallback((probeId, advice, cached) => {
+    setProbes((prev) =>
+      prev.map((p) => p.id === probeId ? { ...p, aiAdvice: advice, aiAdviceCached: cached } : p)
+    );
+  }, []);
 
   // Pit temp display value (convert F→display unit)
   const pitTempDisplay = targetPitTempF !== ""
@@ -495,6 +522,7 @@ export default function App() {
                     onUngroup={handleUnlinkProbe}
                     onApplyPitTemp={handleApplyPitTemp}
                     onMarkInserted={handleMarkInserted}
+                    onAdviceUpdate={handleAdviceUpdate}
                   />
                 )];
               }
@@ -517,6 +545,7 @@ export default function App() {
                   availablePartners={availablePartners}
                   onGroupWith={handleLinkProbe}
                   onMarkInserted={handleMarkInserted}
+                  onAdviceUpdate={handleAdviceUpdate}
                 />
               )];
             });
