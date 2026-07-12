@@ -51,7 +51,7 @@ def _cors():
     return {
         "Access-Control-Allow-Origin":  "*",
         "Access-Control-Allow-Headers": "content-type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST",
+        "Access-Control-Allow-Methods": "OPTIONS,POST,GET",
     }
 
 def _resp(status, body_dict):
@@ -389,6 +389,20 @@ def lambda_handler(event, context):
               event.get("httpMethod", "POST")).upper()
     if method == "OPTIONS":
         return {"statusCode": 204, "headers": _cors()}
+
+    if method == "GET":
+        # Read-only peek at whatever advice is currently cached for this
+        # probe, however old — used to restore the last shown advice on
+        # page load / another device, without ever invoking Bedrock.
+        qs = event.get("queryStringParameters") or {}
+        session_id = qs.get("session_id")
+        probe_id   = qs.get("probe_id")
+        if not session_id or not probe_id:
+            return _resp(400, {"error": "session_id and probe_id are required"})
+        cached_probe = _get_analytics(session_id, probe_id)
+        if cached_probe and cached_probe.get("last_advice"):
+            return _resp(200, {"advice": cached_probe["last_advice"], "cached": True})
+        return _resp(200, {"advice": None, "cached": False})
 
     payload    = _parse_event(event)
     session_id = payload.get("session_id")

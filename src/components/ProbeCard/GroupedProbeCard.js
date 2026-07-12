@@ -52,6 +52,7 @@ function GroupedProbeCard({
   onUngroup,
   onApplyPitTemp,
   onMarkInserted,
+  onAdviceUpdate,
 }) {
   const [p1, p2] = probes;
   const ul = unitLabel(unit);
@@ -64,8 +65,7 @@ function GroupedProbeCard({
   const [max2F, setMax2F] = useState(p2.maxAlert ?? "");
   const [configOpen,   setConfigOpen]   = useState(false);
   const [advisorBusy,  setAdvisorBusy]  = useState(false);
-  const [advice,       setAdvice]       = useState(null);
-  const [adviceCached, setAdviceCached] = useState(false);
+  const [adviceError,  setAdviceError]  = useState(null);
 
   // Re-sync local edit state whenever the underlying assignment actually
   // changes, not just on mount — see ProbeCard.js for why depending only on
@@ -77,7 +77,6 @@ function GroupedProbeCard({
     setMax1F(p1.maxAlert ?? "");
     setMin2F(p2.minAlert ?? "");
     setMax2F(p2.maxAlert ?? "");
-    setAdvice(null);
   }, [p1.id, p2.id, p1.itemType, p1.itemWeight, p1.minAlert, p1.maxAlert, p2.minAlert, p2.maxAlert]);
 
   const selectedItem = useMemo(
@@ -123,23 +122,24 @@ function GroupedProbeCard({
 
   // Use the lower-temp probe for AI (the undercooked end matters most)
   const advisorProbe = (p1.temperature ?? Infinity) <= (p2.temperature ?? Infinity) ? p1 : p2;
+  const advice = advisorProbe.aiAdvice ?? null;
+  const adviceCached = advisorProbe.aiAdviceCached ?? false;
 
   const handleAdvisor = useCallback(async () => {
     if (!sessionId) return;
     setAdvisorBusy(true);
+    setAdviceError(null);
     try {
       const res = await postAdvisor({ session_id: sessionId, probe_id: advisorProbe.id });
       if (!res || res.error) throw new Error(res?.error || "Advisor error");
-      setAdvice(res.advice);
-      setAdviceCached(res.cached ?? false);
+      onAdviceUpdate?.(advisorProbe.id, res.advice, res.cached ?? false);
     } catch (err) {
       console.error("Advisor error:", err); // eslint-disable-line no-console
-      setAdvice({ notes: "Unable to get AI guidance right now. Please try again." });
-      setAdviceCached(false);
+      setAdviceError("Unable to get AI guidance right now. Please try again.");
     } finally {
       setAdvisorBusy(false);
     }
-  }, [sessionId, advisorProbe.id]);
+  }, [sessionId, advisorProbe.id, onAdviceUpdate]);
 
   const ror1 = useMemo(() => computeRateOfRise(data, p1.id), [data, p1.id]);
   const ror2 = useMemo(() => computeRateOfRise(data, p2.id), [data, p2.id]);
@@ -244,6 +244,7 @@ function GroupedProbeCard({
           isColdSmoke={isColdSmoke}
         />
       )}
+      {adviceError && <div className="probe-card__advisor-error">{adviceError}</div>}
 
       {/* Actions */}
       <div className="probe-card__actions">

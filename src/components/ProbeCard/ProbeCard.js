@@ -73,7 +73,7 @@ function computeRateOfRise(data, probeId, window = 10) {
   return Math.round((delta / (vals.length - 1)) * 60 * 10) / 10;
 }
 
-function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp, availablePartners = [], onGroupWith, onMarkInserted }) {
+function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", onSetAlert, onClearAlert, onItemChange, onApplyPitTemp, availablePartners = [], onGroupWith, onMarkInserted, onAdviceUpdate }) {
   const [itemType,     setItemType]     = useState(probe.itemType   ?? "");
   const [itemWeight,   setItemWeight]   = useState(probe.itemWeight ?? "");
   // alerts stored internally in °F
@@ -81,8 +81,14 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
   const [maxAlertF,    setMaxAlertF]    = useState(probe.maxAlert   ?? "");
   const [configOpen,   setConfigOpen]   = useState(false);
   const [advisorBusy,  setAdvisorBusy]  = useState(false);
-  const [advice,       setAdvice]       = useState(null);
-  const [adviceCached, setAdviceCached] = useState(false);
+  const [adviceError,  setAdviceError]  = useState(null);
+
+  // Advice lives in App.js's probe state (persisted server-side, re-fetched
+  // every poll) instead of local state, so the last response shown survives
+  // a page refresh or logging in from another device — it only changes when
+  // the user reruns it or the backend cache does.
+  const advice = probe.aiAdvice ?? null;
+  const adviceCached = probe.aiAdviceCached ?? false;
 
   // Re-sync local edit state whenever the underlying assignment actually
   // changes — not just on mount. Depending only on probe.id (which never
@@ -94,7 +100,6 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
     setItemWeight(probe.itemWeight ?? "");
     setMinAlertF(probe.minAlert  ?? "");
     setMaxAlertF(probe.maxAlert  ?? "");
-    setAdvice(null);
   }, [probe.id, probe.itemType, probe.itemWeight, probe.minAlert, probe.maxAlert]);
 
   const selectedItem = useMemo(
@@ -154,19 +159,18 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
   const handleAdvisor = useCallback(async () => {
     if (!sessionId) return;
     setAdvisorBusy(true);
+    setAdviceError(null);
     try {
       const res = await postAdvisor({ session_id: sessionId, probe_id: probe.id });
       if (!res || res.error) throw new Error(res?.error || "Advisor error");
-      setAdvice(res.advice);
-      setAdviceCached(res.cached ?? false);
+      onAdviceUpdate?.(probe.id, res.advice, res.cached ?? false);
     } catch (err) {
       console.error("Advisor error:", err); // eslint-disable-line no-console
-      setAdvice({ notes: "Unable to get AI guidance right now. Please try again." });
-      setAdviceCached(false);
+      setAdviceError("Unable to get AI guidance right now. Please try again.");
     } finally {
       setAdvisorBusy(false);
     }
-  }, [sessionId, probe.id]);
+  }, [sessionId, probe.id, onAdviceUpdate]);
 
   const temp    = probe.temperature; // always °F
   const hasTemp = temp !== null && temp !== undefined;
@@ -253,6 +257,7 @@ function ProbeCard({ probe, data = [], sessionId, itemTypes = [], unit = "F", on
           isColdSmoke={isColdSmoke}
         />
       )}
+      {adviceError && <div className="probe-card__advisor-error">{adviceError}</div>}
 
       {/* Actions */}
       <div className="probe-card__actions">

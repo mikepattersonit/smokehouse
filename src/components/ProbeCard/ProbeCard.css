@@ -345,3 +345,9 @@
   line-height: 1.5;
   color: var(--text3);
 }
+
+.probe-card__advisor-error {
+  font-size: 0.72rem;
+  color: var(--red);
+  padding: 6px 0 0;
+}

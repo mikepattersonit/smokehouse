@@ -101,6 +101,21 @@ export async function postAdvisor(payload) {
   });
 }
 
+/**
+ * GET /advisor?session_id=&probe_id= — a read-only peek at whatever advice
+ * is currently cached for this probe (however old), without invoking
+ * Bedrock. Used to restore the last shown advice on load/poll so it
+ * persists across refreshes and devices until the user reruns it.
+ */
+export async function fetchAdvisorCache(sessionId, probeId) {
+  if (!sessionId || !probeId) return null;
+  try {
+    return await jsonFetch(`${API_BASE}/advisor?session_id=${encodeURIComponent(sessionId)}&probe_id=${encodeURIComponent(probeId)}`);
+  } catch {
+    return null;
+  }
+}
+
 // ---------- Session settings ----------
 /**
  * POST /sessions/update
