@@ -6,6 +6,7 @@ import Alerts from "./components/Alerts/Alerts";
 import ProbeCard from "./components/ProbeCard/ProbeCard";
 import { fetchLatestSession, fetchSessions, fetchSensors, fetchItemTypes, updateSession, fetchProbeAssignments, saveProbeAssignment } from "./api";
 import GroupedProbeCard from "./components/ProbeCard/GroupedProbeCard";
+import ContactsModal from "./components/Contacts/ContactsModal";
 import SessionSelector from "./components/SessionSelector/SessionSelector";
 import { sessionIdToDate } from "./components/SessionSelector/formatDateTime";
 import { toDisplay, fromDisplay, unitLabel } from "./utils/temperature";
@@ -50,6 +51,7 @@ export default function App() {
   const [sessionActive, setSessionActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [contactsOpen, setContactsOpen] = useState(false);
   const timerRef = useRef(null);
   const clockRef = useRef(null);
   const inFlightRef = useRef(false);
@@ -366,6 +368,9 @@ export default function App() {
           <div className="header-right">
             {loading && <span className="header-loading">Loading…</span>}
             {error   && <span className="header-error">{error}</span>}
+            <button className="unit-toggle" onClick={() => setContactsOpen(true)}>
+              🔔 Alerts
+            </button>
             <button
               className={`unit-toggle${unit === "C" ? " unit-toggle--active" : ""}`}
               onClick={() => setUnit((u) => u === "F" ? "C" : "F")}
@@ -520,6 +525,8 @@ export default function App() {
       </div>
 
       {alerts.length > 0 && <Alerts alerts={alerts} onClearAlert={onClearAlert} />}
+
+      {contactsOpen && <ContactsModal onClose={() => setContactsOpen(false)} />}
     </div>
   );
 }
