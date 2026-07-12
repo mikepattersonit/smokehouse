@@ -6,6 +6,29 @@ import AdvisorPanel from "./AdvisorPanel";
 import ProbeChart from "./ProbeChart";
 import { toDisplay, fromDisplay, unitLabel } from "../../utils/temperature";
 
+function parseCompactUtc(ts) {
+  const s = String(ts || "").trim();
+  if (s.length < 16 || !s.includes("T") || !s.endsWith("Z")) return null;
+  const iso = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(9,11)}:${s.slice(11,13)}:${s.slice(13,15)}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function minutesSince(insertedAt, latestTimestamp) {
+  const start = parseCompactUtc(insertedAt);
+  const end = parseCompactUtc(latestTimestamp);
+  if (!start || !end) return null;
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60000));
+}
+
+function fmtElapsed(minutes) {
+  if (minutes === null || minutes === undefined) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+
 function computeRateOfRise(data, probeId, window = 10) {
   const vals = data
     .map((r) => r[probeId])
@@ -28,6 +51,7 @@ function GroupedProbeCard({
   onItemChange,
   onUngroup,
   onApplyPitTemp,
+  onMarkInserted,
 }) {
   const [p1, p2] = probes;
   const ul = unitLabel(unit);
@@ -43,6 +67,9 @@ function GroupedProbeCard({
   const [advice,       setAdvice]       = useState(null);
   const [adviceCached, setAdviceCached] = useState(false);
 
+  // Re-sync local edit state whenever the underlying assignment actually
+  // changes, not just on mount — see ProbeCard.js for why depending only on
+  // the probe ids missed data that arrived after the initial render.
   useEffect(() => {
     setItemType(p1.itemType   ?? "");
     setItemWeight(p1.itemWeight ?? "");
@@ -51,7 +78,7 @@ function GroupedProbeCard({
     setMin2F(p2.minAlert ?? "");
     setMax2F(p2.maxAlert ?? "");
     setAdvice(null);
-  }, [p1.id, p2.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [p1.id, p2.id, p1.itemType, p1.itemWeight, p1.minAlert, p1.maxAlert, p2.minAlert, p2.maxAlert]);
 
   const selectedItem = useMemo(
     () => itemTypes.find((it) => it.name === itemType) || null,
@@ -137,6 +164,18 @@ function GroupedProbeCard({
   const hasItem = Boolean(itemType);
   const hasAlerts = min1F || max1F || min2F || max2F;
 
+  const insertedElapsed = useMemo(() => {
+    if (!p1.insertedAt) return null;
+    const latestRow = data[0];
+    if (!latestRow) return null;
+    return minutesSince(p1.insertedAt, latestRow.timestamp);
+  }, [p1.insertedAt, data]);
+
+  const handleMarkInserted = useCallback(() => {
+    onMarkInserted?.(p1.id);
+    onMarkInserted?.(p2.id);
+  }, [onMarkInserted, p1.id, p2.id]);
+
   return (
     <div className={`probe-card probe-card--grouped${hasItem ? " probe-card--active" : ""}${isColdSmoke ? " probe-card--cold" : ""}`}>
 
@@ -148,6 +187,9 @@ function GroupedProbeCard({
             <span className={`probe-card__tag ${isColdSmoke ? "probe-card__tag--cold" : "probe-card__tag--assigned"}`}>
               {isColdSmoke ? "❄ " : ""}{itemType}{itemWeight ? ` · ${itemWeight} lb` : ""}
             </span>
+          )}
+          {insertedElapsed !== null && (
+            <span className="probe-card__meta">🔪 inserted {fmtElapsed(insertedElapsed)} ago</span>
           )}
         </div>
         <button
@@ -208,6 +250,11 @@ function GroupedProbeCard({
         {hasItem && !isColdSmoke && (
           <button className="probe-btn probe-btn--ai" onClick={handleAdvisor} disabled={advisorBusy}>
             {advisorBusy ? "Getting AI…" : advice ? "↻ Refresh AI" : "🤖 AI Guidance"}
+          </button>
+        )}
+        {hasItem && (
+          <button className="probe-btn probe-btn--insert" onClick={handleMarkInserted}>
+            📍 {p1.insertedAt ? "Re-mark Inserted" : "Mark Inserted"}
           </button>
         )}
         <button className="probe-btn probe-btn--config" onClick={() => setConfigOpen((o) => !o)}>

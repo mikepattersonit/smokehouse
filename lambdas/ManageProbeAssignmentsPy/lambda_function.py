@@ -66,6 +66,7 @@ def lambda_handler(event, context):
         max_alert   = data.get("maxAlert")
         mobile      = data.get("mobileNumber") or data.get("mobile_number")
         group_id    = data.get("groupId") or data.get("group_id") or None
+        inserted_at = data.get("insertedAt") or data.get("inserted_at") or None
 
         if not session_id or not probe_id:
             return _response(400, {"ok": False, "error": "sessionId and probeId are required"})
@@ -79,6 +80,7 @@ def lambda_handler(event, context):
             "max_alert": max_alert if max_alert not in ("", None) else None,
             "mobile_number": mobile if mobile not in ("", None) else None,
             "group_id": group_id if group_id not in ("", None) else None,
+            "inserted_at": inserted_at if inserted_at not in ("", None) else None,
         }
 
         try:
