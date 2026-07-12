@@ -15,15 +15,20 @@ function elapsedMinutes(sessionId, timestamp) {
       parseInt(s.slice(10, 12)) * 60 +
       parseInt(s.slice(12, 14));
     const ts = String(timestamp).trim();
-    let endSec;
+    let hhmmss;
     if (ts.length === 6 && /^\d{6}$/.test(ts)) {
-      endSec =
-        parseInt(ts.slice(0, 2)) * 3600 +
-        parseInt(ts.slice(2, 4)) * 60 +
-        parseInt(ts.slice(4, 6));
+      hhmmss = ts;
+    } else if (ts.length >= 16 && ts.includes("T") && ts.endsWith("Z")) {
+      // "YYYYMMDDTHHMMSSZ" — HHMMSS starts right after "T"
+      const tIdx = ts.indexOf("T");
+      hhmmss = ts.slice(tIdx + 1, tIdx + 7);
     } else {
       return null;
     }
+    const endSec =
+      parseInt(hhmmss.slice(0, 2)) * 3600 +
+      parseInt(hhmmss.slice(2, 4)) * 60 +
+      parseInt(hhmmss.slice(4, 6));
     let diff = endSec - startSec;
     if (diff < 0) diff += 86400;
     return Math.max(0, Math.floor(diff / 60));
