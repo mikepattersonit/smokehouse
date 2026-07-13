@@ -187,9 +187,18 @@ export default function App() {
         prev.map((p) => {
           const a = assignments.find((x) => x.probe_id === p.id);
           const adv = adviceByProbe[p.id];
+          const hasAssignment = Boolean(a?.item_type);
           // No `if (!a) return p` fallback here on purpose: a probe with no
           // assignment in the viewed session must reset to blank, not keep
           // whatever was displayed for the previously-viewed session.
+          //
+          // For advice: if the probe IS assigned but the cache returned nothing,
+          // preserve the current advice rather than clearing it. The poll and the
+          // postAdvisor write can race — the cache GET may land before DynamoDB
+          // commits the result, which would flash the advice away immediately
+          // after it appears. Only wipe advice when the probe is genuinely
+          // unassigned (session switch), or when we have real cache data to
+          // replace it with.
           return {
             ...p,
             itemType:   a?.item_type   ?? "",
@@ -198,8 +207,10 @@ export default function App() {
             maxAlert:   a?.max_alert  != null ? String(a.max_alert) : "",
             groupId:    a?.group_id   ?? null,
             insertedAt: a?.inserted_at ?? null,
-            aiAdvice:       adv ? adv.advice : null,
-            aiAdviceCached: adv ? adv.cached : false,
+            aiAdvice:       adv           ? adv.advice       :
+                            hasAssignment ? p.aiAdvice        : null,
+            aiAdviceCached: adv           ? adv.cached        :
+                            hasAssignment ? p.aiAdviceCached  : false,
           };
         })
       );
